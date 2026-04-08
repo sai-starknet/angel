@@ -140,7 +140,6 @@ pub trait Decoder: Send + Sync {
     ///
     /// # Returns
     /// Vector of envelopes produced from this event (empty if not interested).
-
     async fn decode_event(&self, event: &StarknetEvent) -> anyhow::Result<Vec<Envelope>> {
         self.decode(&event.keys, &event.data, event.context()).await
     }

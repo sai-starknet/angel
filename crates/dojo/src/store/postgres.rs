@@ -9,7 +9,7 @@ use sqlx::migrate::Migrator;
 use sqlx::query::Query;
 use sqlx::types::Json;
 use sqlx::FromRow;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use torii_introspect::postgres::owned::PgTypeDef;
 use torii_introspect::postgres::PgFelt;

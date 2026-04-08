@@ -1,5 +1,6 @@
 //! gRPC service implementation for ERC721 queries and subscriptions
 
+use crate::conversions::{bytes_to_u256, u256_to_bytes};
 use crate::proto::{
     erc721_server::Erc721 as Erc721Trait, AttributeFacetCount, CollectionToken,
     ContractCollectionOverview, Cursor, GetCollectionOverviewRequest,
@@ -20,7 +21,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
-use torii_common::{bytes_to_felt, bytes_to_u256, u256_to_bytes};
+
+fn bytes_to_felt(bytes: &[u8]) -> Option<Felt> {
+    if bytes.len() > 32 {
+        return None;
+    }
+
+    let mut padded = [0u8; 32];
+    padded[32 - bytes.len()..].copy_from_slice(bytes);
+    Some(Felt::from_bytes_be(&padded))
+}
 
 const DEFAULT_PROJECT_ID: &str = "arcade-main";
 

@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_postgres::types::ToSql as PgToSql;
 use tokio_postgres::{Client, NoTls};
-use torii_common::{blob_to_u256, u256_to_blob};
+use torii_common::{blob_to_felt, blob_to_u256, felt_to_blob, u256_to_blob};
 
 use crate::balance_fetcher::BalanceFetchRequest;
 
@@ -29,6 +29,21 @@ const SQLITE_ACTIVITY_INSERT_CHUNK: usize = SQLITE_MAX_BIND_VARS / 5;
 const SQLITE_BALANCE_UPSERT_CHUNK: usize = SQLITE_MAX_BIND_VARS / 5;
 const SQLITE_ADJUSTMENT_INSERT_CHUNK: usize = SQLITE_MAX_BIND_VARS / 6;
 const DEFAULT_BALANCE_CACHE_CAPACITY: usize = 300_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StorageBackend {
+    Sqlite,
+    Postgres,
+}
+
+/// Storage for ERC20 token data.
+pub struct Erc20Storage {
+    backend: StorageBackend,
+    conn: Arc<Mutex<Connection>>,
+    balance_cache: Arc<Mutex<BalanceCacheState>>,
+    pg_conns: Option<Vec<Arc<tokio::sync::Mutex<Client>>>>,
+    pg_rr: AtomicUsize,
+}
 
 #[derive(Debug)]
 struct BalanceCacheState {

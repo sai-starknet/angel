@@ -5,7 +5,7 @@ use crate::{DbResult, NamespaceMode, RecordResult, TableResult};
 use async_trait::async_trait;
 use introspect_types::{ColumnDef, PrimaryDef};
 use sqlx::{Database, Pool};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::fmt::Debug;
 use torii_introspect::events::IntrospectBody;
 use torii_introspect::Record;

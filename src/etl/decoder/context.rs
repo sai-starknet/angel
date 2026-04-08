@@ -419,15 +419,20 @@ mod tests {
             "ordered_decoder"
         }
 
-        async fn decode(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>> {
-            if event.from_address != self.contract {
+        async fn decode(
+            &self,
+            _keys: &[Felt],
+            _data: &[Felt],
+            context: EventContext,
+        ) -> anyhow::Result<Vec<Envelope>> {
+            if context.from_address != self.contract {
                 return Ok(Vec::new());
             }
 
             Ok(vec![Envelope::new(
-                format!("evt-{}", event.block_number.unwrap_or_default()),
+                format!("evt-{}", context.block_number),
                 Box::new(TestBody {
-                    seq: event.block_number.unwrap_or_default(),
+                    seq: context.block_number,
                 }),
                 HashMap::new(),
             )])
@@ -452,12 +457,11 @@ mod tests {
         let context = DecoderContext::new(vec![decoder], engine_db, ContractFilter::new());
 
         let events = (0..600_u64)
-            .map(|seq| EmittedEvent {
+            .map(|seq| crate::etl::StarknetEvent {
                 from_address: contract,
                 keys: Vec::new(),
                 data: Vec::new(),
-                block_hash: None,
-                block_number: Some(seq),
+                block_number: seq,
                 transaction_hash: Felt::from(seq + 1),
             })
             .collect::<Vec<_>>();

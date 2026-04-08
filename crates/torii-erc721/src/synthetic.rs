@@ -5,11 +5,26 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt, U256};
+use starknet::core::types::U256;
 use starknet::macros::selector;
+use starknet_types_raw::Felt;
 use torii::etl::extractor::{ExtractionBatch, SyntheticExtractor};
+use torii::etl::StarknetEvent;
+
+use crate::conversions::core_to_raw_felt;
 
 const EXTRACTOR_NAME: &str = "synthetic_erc721";
+
+fn raw_selector(name: &str) -> Felt {
+    core_to_raw_felt(match name {
+        "Transfer" => selector!("Transfer"),
+        "Approval" => selector!("Approval"),
+        "ApprovalForAll" => selector!("ApprovalForAll"),
+        "MetadataUpdate" => selector!("MetadataUpdate"),
+        "BatchMetadataUpdate" => selector!("BatchMetadataUpdate"),
+        _ => unreachable!(),
+    })
+}
 
 /// Configuration for the synthetic ERC721 workload.
 #[derive(Debug, Clone)]
@@ -210,65 +225,60 @@ impl SyntheticErc721Extractor {
                 let token_id = self.token_id_for(block_number, tx_index);
 
                 let event = match self.event_type_for(tx_index) {
-                    Erc721EventType::Transfer => EmittedEvent {
-                        from_address: token,
-                        keys: vec![
-                            selector!("Transfer"),
+                    Erc721EventType::Transfer => StarknetEvent::new(
+                        token,
+                        vec![
+                            raw_selector("Transfer"),
                             from,
                             to,
                             Felt::from(token_id.low()),
                             Felt::from(token_id.high()),
                         ],
-                        data: vec![],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    },
-                    Erc721EventType::Approval => EmittedEvent {
-                        from_address: token,
-                        keys: vec![
-                            selector!("Approval"),
+                        vec![],
+                        block_number,
+                        tx_hash,
+                    ),
+                    Erc721EventType::Approval => StarknetEvent::new(
+                        token,
+                        vec![
+                            raw_selector("Approval"),
                             from,
                             to,
                             Felt::from(token_id.low()),
                             Felt::from(token_id.high()),
                         ],
-                        data: vec![],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    },
-                    Erc721EventType::ApprovalForAll => EmittedEvent {
-                        from_address: token,
-                        keys: vec![selector!("ApprovalForAll"), from, to],
-                        data: vec![Felt::from(1u64)],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    },
-                    Erc721EventType::MetadataUpdate => EmittedEvent {
-                        from_address: token,
-                        keys: vec![selector!("MetadataUpdate")],
-                        data: vec![Felt::from(token_id.low()), Felt::from(token_id.high())],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    },
+                        vec![],
+                        block_number,
+                        tx_hash,
+                    ),
+                    Erc721EventType::ApprovalForAll => StarknetEvent::new(
+                        token,
+                        vec![raw_selector("ApprovalForAll"), from, to],
+                        vec![Felt::from(1u64)],
+                        block_number,
+                        tx_hash,
+                    ),
+                    Erc721EventType::MetadataUpdate => StarknetEvent::new(
+                        token,
+                        vec![raw_selector("MetadataUpdate")],
+                        vec![Felt::from(token_id.low()), Felt::from(token_id.high())],
+                        block_number,
+                        tx_hash,
+                    ),
                     Erc721EventType::BatchMetadataUpdate => {
                         let to_id = token_id + U256::from(100u64);
-                        EmittedEvent {
-                            from_address: token,
-                            keys: vec![selector!("BatchMetadataUpdate")],
-                            data: vec![
+                        StarknetEvent::new(
+                            token,
+                            vec![raw_selector("BatchMetadataUpdate")],
+                            vec![
                                 Felt::from(token_id.low()),
                                 Felt::from(token_id.high()),
                                 Felt::from(to_id.low()),
                                 Felt::from(to_id.high()),
                             ],
-                            block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                            block_number: Some(block_number),
-                            transaction_hash: tx_hash,
-                        }
+                            block_number,
+                            tx_hash,
+                        )
                     }
                 };
 
@@ -376,11 +386,11 @@ mod tests {
         let mut extractor = SyntheticErc721Extractor::new(cfg).unwrap();
         let batch = extractor.extract(None).await.unwrap();
 
-        let transfer_selector = selector!("Transfer");
-        let approval_selector = selector!("Approval");
-        let approval_for_all_selector = selector!("ApprovalForAll");
-        let metadata_update_selector = selector!("MetadataUpdate");
-        let batch_metadata_update_selector = selector!("BatchMetadataUpdate");
+        let transfer_selector = raw_selector("Transfer");
+        let approval_selector = raw_selector("Approval");
+        let approval_for_all_selector = raw_selector("ApprovalForAll");
+        let metadata_update_selector = raw_selector("MetadataUpdate");
+        let batch_metadata_update_selector = raw_selector("BatchMetadataUpdate");
 
         let mut has_transfer = false;
         let mut has_approval = false;

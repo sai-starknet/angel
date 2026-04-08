@@ -155,8 +155,8 @@ mod tests {
             batch.set_cursor(Self::make_cursor(block));
             batch.add_block_context(
                 block,
-                starknet::core::types::Felt::ZERO,
-                starknet::core::types::Felt::ZERO,
+                starknet::core::types::Felt::ZERO.into(),
+                starknet::core::types::Felt::ZERO.into(),
                 0,
             );
             Ok(batch)

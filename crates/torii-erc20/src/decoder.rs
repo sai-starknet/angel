@@ -99,6 +99,37 @@ impl Erc20Decoder {
         APPROVAL_SELECTOR
     }
 
+    pub async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+        if event.keys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let selector = event.keys[0];
+
+        if selector == Self::transfer_selector() {
+            if let Some(envelope) = self.decode_transfer(event).await? {
+                return Ok(vec![envelope]);
+            }
+        } else if selector == Self::approval_selector() {
+            if let Some(envelope) = self.decode_approval(event).await? {
+                return Ok(vec![envelope]);
+            }
+        } else {
+            tracing::trace!(
+                target: "torii_erc20::decoder",
+                token = %format!("{:#x}", event.from_address),
+                selector = %format!("{:#x}", selector),
+                keys_len = event.keys.len(),
+                data_len = event.data.len(),
+                block_number = event.block_number.unwrap_or(0),
+                tx_hash = %format!("{:#x}", event.transaction_hash),
+                "Unhandled event selector"
+            );
+        }
+
+        Ok(Vec::new())
+    }
+
     /// Decode Transfer event into envelope
     ///
     /// Transfer event signatures (supports multiple formats):
@@ -424,36 +455,16 @@ impl Decoder for Erc20Decoder {
         data: &[Felt],
         context: EventContext,
     ) -> Result<Vec<Envelope>> {
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
+        let event = EmittedEvent {
+            from_address: context.from_address,
+            keys: keys.to_vec(),
+            data: data.to_vec(),
+            block_hash: None,
+            block_number: Some(context.block_number),
+            transaction_hash: context.transaction_hash,
+        };
 
-        let selector = keys[0];
-
-        if selector == Self::transfer_selector() {
-            if let Some(envelope) = self.decode_transfer(event).await? {
-                return Ok(vec![envelope]);
-            }
-        } else if selector == Self::approval_selector() {
-            if let Some(envelope) = self.decode_approval(event).await? {
-                return Ok(vec![envelope]);
-            }
-        } else {
-            // Log unhandled selectors to help identify missing event types.
-            // This is expected for contracts that emit other events besides ERC20 Transfer/Approval.
-            tracing::trace!(
-                target: "torii_erc20::decoder",
-                token = %format!("{:#x}", event.from_address),
-                selector = %format!("{:#x}", selector),
-                keys_len = event.keys.len(),
-                data_len = event.data.len(),
-                block_number = event.block_number.unwrap_or(0),
-                tx_hash = %format!("{:#x}", event.transaction_hash),
-                "Unhandled event selector"
-            );
-        }
-
-        Ok(Vec::new())
+        Erc20Decoder::decode(self, &event).await
     }
 }
 

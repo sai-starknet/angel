@@ -214,7 +214,7 @@ impl SyntheticErc20Extractor {
                         from_address: token,
                         keys: vec![Felt::selector("Approval"), from, to],
                         data: vec![amount_low, Felt::ZERO],
-                        block_number: block_number,
+                        block_number,
                         transaction_hash: tx_hash,
                     }
                 } else {
@@ -222,7 +222,7 @@ impl SyntheticErc20Extractor {
                         from_address: token,
                         keys: vec![Felt::selector("Transfer"), from, to],
                         data: vec![amount_low, Felt::ZERO],
-                        block_number: block_number,
+                        block_number,
                         transaction_hash: tx_hash,
                     }
                 };

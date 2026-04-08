@@ -5,9 +5,9 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet_types_raw::event::EmittedEvent;
 use starknet_types_raw::Felt;
 use torii::etl::extractor::{ExtractionBatch, SyntheticExtractor};
+use torii::etl::StarknetEvent;
 
 use crate::decoder::{APPROVAL_SELECTOR, TRANSFER_SELECTOR};
 
@@ -162,23 +162,21 @@ impl SyntheticErc20Extractor {
                 let amount_low = self.amount_low_for(block_number, tx_index);
 
                 let event = if self.is_approval(tx_index) {
-                    EmittedEvent {
-                        from_address: token,
-                        keys: vec![APPROVAL_SELECTOR, from, to],
-                        data: vec![amount_low, Felt::ZERO],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    }
+                    StarknetEvent::new(
+                        token,
+                        vec![APPROVAL_SELECTOR, from, to],
+                        vec![amount_low, Felt::ZERO],
+                        block_number,
+                        tx_hash,
+                    )
                 } else {
-                    EmittedEvent {
-                        from_address: token,
-                        keys: vec![TRANSFER_SELECTOR, from, to],
-                        data: vec![amount_low, Felt::ZERO],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
-                        transaction_hash: tx_hash,
-                    }
+                    StarknetEvent::new(
+                        token,
+                        vec![TRANSFER_SELECTOR, from, to],
+                        vec![amount_low, Felt::ZERO],
+                        block_number,
+                        tx_hash,
+                    )
                 };
                 batch.add_event_with_tx_context(
                     event,

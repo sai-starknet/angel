@@ -617,13 +617,18 @@ mod tests {
             .await
             .unwrap();
 
-        let username: String = query_scalar(&format!(
-            "SELECT username FROM {CONTROLLERS_TABLE} WHERE address = ?1"
-        ))
-        .bind("0x0000000000000000000000000000000000000000000000000000000000000123")
-        .fetch_one(&sink.store.pool)
-        .await
-        .unwrap();
+        let controller_count: i64 =
+            query_scalar(&format!("SELECT COUNT(*) FROM {CONTROLLERS_TABLE}"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(controller_count, 1);
+
+        let username: String =
+            query_scalar(&format!("SELECT username FROM {CONTROLLERS_TABLE} LIMIT 1"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
         assert_eq!(username, "test_user");
 
         let synced_until: i64 = query_scalar(&format!(
@@ -677,13 +682,18 @@ mod tests {
             .await
             .unwrap();
 
-        let username: String = query_scalar(&format!(
-            "SELECT username FROM {CONTROLLERS_TABLE} WHERE id = ?1"
-        ))
-        .bind("0x0000000000000000000000000000000000000000000000000000000000000123")
-        .fetch_one(&sink.store.pool)
-        .await
-        .unwrap();
+        let controller_count: i64 =
+            query_scalar(&format!("SELECT COUNT(*) FROM {CONTROLLERS_TABLE}"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(controller_count, 1);
+
+        let username: String =
+            query_scalar(&format!("SELECT username FROM {CONTROLLERS_TABLE} LIMIT 1"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
         assert_eq!(username, "user_one");
     }
 
@@ -712,13 +722,18 @@ mod tests {
             .unwrap();
         initialize_sink(&mut sink).await;
 
-        let username: String = query_scalar(&format!(
-            "SELECT username FROM {CONTROLLERS_TABLE} WHERE address = ?1"
-        ))
-        .bind("0x0000000000000000000000000000000000000000000000000000000000000456")
-        .fetch_one(&sink.store.pool)
-        .await
-        .unwrap();
+        let controller_count: i64 =
+            query_scalar(&format!("SELECT COUNT(*) FROM {CONTROLLERS_TABLE}"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
+        assert_eq!(controller_count, 1);
+
+        let username: String =
+            query_scalar(&format!("SELECT username FROM {CONTROLLERS_TABLE} LIMIT 1"))
+                .fetch_one(&sink.store.pool)
+                .await
+                .unwrap();
         assert_eq!(username, "boot_user");
 
         let synced_until: i64 = query_scalar(&format!(

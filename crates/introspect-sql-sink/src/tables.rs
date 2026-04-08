@@ -4,7 +4,7 @@ use crate::namespace::{NamespaceKey, TableKey};
 use crate::table::Table;
 use crate::{DbError, DbResult};
 use introspect_types::{ColumnDef, PrimaryDef, ResultInto};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::RwLock;

@@ -112,10 +112,10 @@ starknet-types-raw = { git = "https://github.com/cartridge-gg/starknet-types-raw
 tonic-build = "0.12"
 
 # Introspect
-introspect-events = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-introspect-types = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-introspect-rust-macros = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-dojo-introspect = { git = "https://github.com/dojoengine/dojo-introspect", rev = "1345486" }
+introspect-events = { git = "https://github.com/cartridge-gg/introspect", rev = "b89ee9e" }
+introspect-types = { git = "https://github.com/cartridge-gg/introspect", rev = "b89ee9e" }
+introspect-rust-macros = { git = "https://github.com/cartridge-gg/introspect", rev = "b89ee9e" }
+dojo-introspect = { git = "https://github.com/dojoengine/dojo-introspect", rev = "c45d711" }
 
 
 # Utils
@@ -229,6 +229,7 @@ tower.workspace = true
 resolve-path.workspace = true
 itertools.workspace = true
 dojo-introspect.workspace = true
+primitive-types.workspace = true
 
 
 torii-sql = { workspace = true, features = ["postgres", "sqlite"] }

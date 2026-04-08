@@ -901,20 +901,18 @@ mod tests {
         let keep = Felt::from(1u64);
         let drop = Felt::from(2u64);
         let events = vec![
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::ZERO,
                 keys: Vec::new(),
                 data: Vec::new(),
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: keep,
             },
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::ZERO,
                 keys: Vec::new(),
                 data: Vec::new(),
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: drop,
             },
         ];
@@ -946,12 +944,11 @@ mod tests {
             .unwrap();
 
         let tx_hash = Felt::from(42u64);
-        let event = EmittedEvent {
+        let event = StarknetEvent {
             from_address: Felt::from(7u64),
             keys: Vec::new(),
             data: Vec::new(),
-            block_hash: None,
-            block_number: Some(123),
+            block_number: 123,
             transaction_hash: tx_hash,
         };
 

@@ -3,7 +3,7 @@ use introspect_types::serialize_def::CairoTypeSerialization;
 use introspect_types::{CairoDeserializer, EnumDef, ResultDef, TupleDef, TypeDef, VariantDef};
 use serde::ser::{Error as SerError, SerializeMap};
 use serde::Serializer;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 
 pub struct PostgresJsonSerializer;
 

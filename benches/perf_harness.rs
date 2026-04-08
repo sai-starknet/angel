@@ -3,7 +3,7 @@ use axum::body::Body;
 use axum::http::Request;
 use axum::Router;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use starknet::macros::selector;
+use primitive_types::U256;
 use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -62,20 +62,18 @@ impl Decoder for MockDecoder {
 
     async fn decode(
         &self,
-        from_address: Felt,
-        keys: &[Felt],
-        data: &[Felt],
-        block_number: u64,
-        transaction_hash: Felt,
+        _keys: &[Felt],
+        _data: &[Felt],
+        context: torii::etl::EventContext,
     ) -> anyhow::Result<Vec<Envelope>> {
-        if from_address != self.contract {
+        if context.from_address != self.contract {
             return Ok(Vec::new());
         }
 
         Ok(vec![Envelope::new(
-            format!("{}:{}", self.name, block_number),
+            format!("{}:{}", self.name, context.block_number),
             Box::new(BenchBody {
-                value: block_number,
+                value: context.block_number,
             }),
             HashMap::new(),
         )])
@@ -201,6 +199,13 @@ fn make_context_event(contract: Felt, seed: u64) -> StarknetEvent {
     }
 }
 
+fn primitive_u256_from_words(low: u128, high: u128) -> U256 {
+    let mut bytes = [0_u8; 32];
+    bytes[..16].copy_from_slice(&low.to_le_bytes());
+    bytes[16..].copy_from_slice(&high.to_le_bytes());
+    U256::from_little_endian(&bytes)
+}
+
 fn make_transfer_batch(size: usize, offset: u64) -> Vec<TransferData> {
     (0..size)
         .map(|i| {
@@ -210,7 +215,7 @@ fn make_transfer_batch(size: usize, offset: u64) -> Vec<TransferData> {
                 token: Felt::from(0x5000 + ((i + offset) % 4)),
                 from: Felt::from(0x6000 + ((i + offset) % 1024)),
                 to: Felt::from(0x7000 + ((i + offset + 7) % 1024)),
-                amount: U256::from_words((i + offset) as u128, 0),
+                amount: primitive_u256_from_words((i + offset) as u128, 0),
                 block_number: 4_000_000 + i + offset,
                 tx_hash: Felt::from(0x8000 + i + offset),
                 timestamp: None,
@@ -259,7 +264,7 @@ fn benchmark_common_conversions(c: &mut Criterion) {
     group.bench_function("felt_roundtrip", |b| {
         b.iter(|| {
             let blob = felt_to_blob(black_box(felt));
-            black_box(blob_to_felt(black_box(&blob)))
+            black_box(blob_to_felt::<Felt>(black_box(&blob)))
         });
     });
 
@@ -267,15 +272,15 @@ fn benchmark_common_conversions(c: &mut Criterion) {
     group.bench_function("u256_roundtrip_small", |b| {
         b.iter(|| {
             let blob = u256_to_blob(black_box(small));
-            black_box(blob_to_u256(black_box(&blob)))
+            black_box(blob_to_u256::<U256>(black_box(&blob)))
         });
     });
 
-    let large = U256::from_words(u128::MAX - 7, u128::MAX - 11);
+    let large = primitive_u256_from_words(u128::MAX - 7, u128::MAX - 11);
     group.bench_function("u256_roundtrip_large", |b| {
         b.iter(|| {
             let blob = u256_to_blob(black_box(large));
-            black_box(blob_to_u256(black_box(&blob)))
+            black_box(blob_to_u256::<U256>(black_box(&blob)))
         });
     });
 

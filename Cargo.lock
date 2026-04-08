@@ -1007,7 +1007,7 @@ dependencies = [
 [[package]]
 name = "dojo-introspect"
 version = "0.1.0"
-source = "git+https://github.com/dojoengine/dojo-introspect?rev=1345486#13454864299f668026053df4cd29dc216d1b264c"
+source = "git+https://github.com/dojoengine/dojo-introspect?rev=c45d711#c45d711236c856bc60d567e43965b2043d5cb2b0"
 dependencies = [
  "async-trait",
  "introspect-rust-macros",
@@ -1017,7 +1017,6 @@ dependencies = [
  "starknet",
  "starknet-crypto",
  "starknet-types-core",
- "starknet-types-raw",
  "thiserror 2.0.18",
 ]
 
@@ -1980,18 +1979,19 @@ dependencies = [
 [[package]]
 name = "introspect-events"
 version = "0.1.2"
-source = "git+https://github.com/cartridge-gg/introspect?rev=6542dec#6542dec194976d50b2cd273a4fb308f068a0abcc"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "cainome-cairo-serde",
  "introspect-types",
  "serde",
- "starknet-types-raw",
+ "starknet",
+ "starknet-types-core",
 ]
 
 [[package]]
 name = "introspect-rust-macros"
 version = "0.1.0"
-source = "git+https://github.com/cartridge-gg/introspect?rev=6542dec#6542dec194976d50b2cd273a4fb308f068a0abcc"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "paste",
  "proc-macro2",
@@ -2003,7 +2003,7 @@ dependencies = [
 [[package]]
 name = "introspect-types"
 version = "0.1.2"
-source = "git+https://github.com/cartridge-gg/introspect?rev=6542dec#6542dec194976d50b2cd273a4fb308f068a0abcc"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "blake3",
  "convert_case",
@@ -2014,7 +2014,8 @@ dependencies = [
  "primitive-types 0.14.0",
  "serde",
  "serde_json",
- "starknet-types-raw",
+ "starknet",
+ "starknet-types-core",
  "thiserror 2.0.18",
 ]
 
@@ -4774,6 +4775,7 @@ dependencies = [
  "itertools 0.14.0",
  "metrics",
  "metrics-exporter-prometheus",
+ "primitive-types 0.14.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "resolve-path",
@@ -4862,6 +4864,7 @@ dependencies = [
  "torii-erc721",
  "torii-introspect",
  "torii-runtime-common",
+ "torii-sql",
  "tracing",
 ]
 
@@ -4981,18 +4984,23 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "primitive-types 0.14.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rusqlite",
  "serde",
  "serde_json",
  "starknet",
+ "starknet-types-raw",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-postgres",
  "tonic",
  "tonic-build",
  "torii",
  "torii-common",
+ "torii-sql",
+ "torii-types",
  "tracing",
 ]
 
@@ -5076,18 +5084,21 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
+ "primitive-types 0.14.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rusqlite",
  "serde",
  "serde_json",
  "starknet",
+ "starknet-types-raw",
  "tokio",
  "tokio-postgres",
  "tonic",
  "tonic-build",
  "torii",
  "torii-common",
+ "torii-sql",
  "tracing",
 ]
 
@@ -5106,6 +5117,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "starknet-types-core",
  "starknet-types-raw",
  "thiserror 2.0.18",
  "tonic-build",
@@ -5157,6 +5169,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "starknet-types-core",
  "starknet-types-raw",
  "thiserror 2.0.18",
  "tokio",
@@ -5288,6 +5301,7 @@ dependencies = [
  "resolve-path",
  "serde",
  "serde_json",
+ "starknet-types-core",
  "starknet-types-raw",
 ]
 
@@ -5334,6 +5348,7 @@ dependencies = [
  "torii-erc20",
  "torii-erc721",
  "torii-runtime-common",
+ "torii-sql",
  "tracing",
  "tracing-subscriber",
 ]

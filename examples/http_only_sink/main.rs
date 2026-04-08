@@ -12,7 +12,7 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use starknet::core::types::EmittedEvent;
+use starknet_types_raw::Felt;
 use std::sync::{Arc, RwLock};
 use torii::axum::extract::State;
 use torii::axum::http::StatusCode;
@@ -21,8 +21,9 @@ use torii::axum::{Json, Router};
 use torii::etl::envelope::{Envelope, TypeId, TypedBody};
 use torii::etl::extractor::ExtractionBatch;
 use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
-use torii::etl::Decoder;
+use torii::etl::{Decoder, EventContext};
 use torii::{async_trait, run, ToriiConfig};
+use torii_types::event::StarknetEvent;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1. DEFINE EVENT TYPE
@@ -107,32 +108,27 @@ impl HttpSink {
         }
     }
 
-    pub fn generate_sample_events() -> Vec<EmittedEvent> {
-        use starknet::core::types::Felt;
-
+    pub fn generate_sample_events() -> Vec<StarknetEvent> {
         vec![
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from_hex("0xaabbccdd").unwrap(),
                 keys: vec![Felt::from_hex("0x1").unwrap()],
                 data: vec![Felt::from_hex("0x100").unwrap()],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from_hex("0x11223344").unwrap(),
                 keys: vec![Felt::from_hex("0x2").unwrap()],
                 data: vec![Felt::from_hex("0x200").unwrap()],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from_hex("0x55667788").unwrap(),
                 keys: vec![Felt::from_hex("0x3").unwrap()],
                 data: vec![Felt::from_hex("0x300").unwrap()],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
         ]
@@ -268,15 +264,20 @@ impl Decoder for HttpDecoder {
         "http"
     }
 
-    async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(
+        &self,
+        _keys: &[Felt],
+        _data: &[Felt],
+        context: EventContext,
+    ) -> Result<Vec<Envelope>> {
         let id = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
         let stored_event = StoredEvent {
             id,
-            from_address: format!("{:#x}", event.from_address),
-            block_number: event.block_number.unwrap_or(0),
+            from_address: format!("{:#x}", context.from_address),
+            block_number: context.block_number,
             timestamp: chrono::Utc::now().timestamp(),
         };
 

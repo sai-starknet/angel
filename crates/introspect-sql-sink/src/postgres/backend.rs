@@ -9,7 +9,7 @@ use crate::{
 use async_trait::async_trait;
 use introspect_types::schema::{Names, TypeDefs};
 use introspect_types::{ColumnDef, FeltIds, PrimaryDef};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use torii_introspect::Record;
 use torii_sql::{PgPool, PgQuery, Postgres};
 

@@ -51,7 +51,7 @@ use torii_runtime_common::database::{
     resolve_token_db_setup, TokenDbSetup, DEFAULT_SQLITE_MAX_CONNECTIONS,
 };
 use torii_runtime_common::token_support::{resolve_installed_token_support, InstalledTokenSupport};
-use torii_sql::DbBackend;
+use torii_sql::{DbBackend, DbPoolOptions};
 
 use crate::config::parse_historical_models;
 
@@ -201,9 +201,9 @@ async fn load_persisted_contract_registries(
     let mut contract_types = contract_type_registry.write().await;
 
     for (contract, decoder_ids, _) in mappings {
-        decoders.insert(contract, decoder_ids.clone());
+        decoders.insert(contract.into(), decoder_ids.clone());
         if let Some(contract_type) = contract_type_from_decoder_ids(&decoder_ids) {
-            contract_types.insert(contract, contract_type);
+            contract_types.insert(contract.into(), contract_type);
         }
     }
 
@@ -233,7 +233,7 @@ fn append_unique_contract_configs(
     for &address in addresses {
         if seen.insert(address) {
             configs.push(ContractEventConfig {
-                address,
+                address: address.into(),
                 from_block,
                 to_block,
             });
@@ -283,7 +283,7 @@ fn apply_contract_mappings(
             contract,
             decoder_ids
         );
-        torii_config = torii_config.map_contract(contract, decoder_ids);
+        torii_config = torii_config.map_contract(contract.into(), decoder_ids);
     }
 
     torii_config
@@ -418,7 +418,10 @@ async fn configure_token_support(
     }
 
     if installed_token_support.erc1155 {
-        let storage = Arc::new(Erc1155Storage::new(&db_setup.erc1155_url).await?);
+        let erc1155_pool = DbPoolOptions::new()
+            .connect_any(&db_setup.erc1155_url)
+            .await?;
+        let storage = Arc::new(Erc1155Storage::new(erc1155_pool, &db_setup.erc1155_url).await?);
         tracing::info!("ERC1155 database initialized: {}", db_setup.erc1155_url);
 
         let decoder: Arc<dyn torii::etl::Decoder> = Arc::new(Erc1155Decoder::new());
@@ -492,7 +495,8 @@ async fn run_indexer(config: Config) -> Result<()> {
             erc1155: !token_targets.erc1155.is_empty(),
         },
     );
-    let historical_models = parse_historical_models(config.historical_models(), &contracts)?;
+    let historical_model_names = config.historical_models();
+    let historical_models = parse_historical_models(&historical_model_names, &contracts)?;
     let token_db_setup = if installed_token_support.any() {
         Some(resolve_token_db_setup(
             db_dir,
@@ -744,7 +748,14 @@ async fn run_with_postgres(
     }
     if config.index_external_contracts {
         torii_config = torii_config
-            .with_registry_cache(decoder_registry.clone())
+            .with_registry_cache(Arc::new(RwLock::new(
+                decoder_registry
+                    .read()
+                    .await
+                    .iter()
+                    .map(|(contract, decoder_ids)| ((*contract).into(), decoder_ids.clone()))
+                    .collect(),
+            )))
             .with_command_handler(Box::new(RegisterExternalContractCommandHandler::new(
                 registry_engine_db.clone(),
                 decoder_registry.clone(),
@@ -927,7 +938,14 @@ async fn run_with_sqlite(
     }
     if config.index_external_contracts {
         torii_config = torii_config
-            .with_registry_cache(decoder_registry.clone())
+            .with_registry_cache(Arc::new(RwLock::new(
+                decoder_registry
+                    .read()
+                    .await
+                    .iter()
+                    .map(|(contract, decoder_ids)| ((*contract).into(), decoder_ids.clone()))
+                    .collect(),
+            )))
             .with_command_handler(Box::new(RegisterExternalContractCommandHandler::new(
                 registry_engine_db.clone(),
                 decoder_registry.clone(),

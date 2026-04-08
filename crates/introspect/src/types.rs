@@ -1,7 +1,7 @@
 use introspect_types::{
     EnumDef, FixedArrayDef, MemberDef, RefDef, ResultDef, StructDef, TypeDef, VariantDef,
 };
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 
 pub trait TypeLibrary {
     type Error;

@@ -6,11 +6,14 @@
 //! ERC1155 has a different signature: balance_of(account, token_id)
 
 use anyhow::{Context, Result};
-use starknet::core::types::{requests::CallRequest, BlockId, Felt, FunctionCall, U256};
+use primitive_types::U256;
+use starknet::core::types::{requests::CallRequest, BlockId, FunctionCall};
 use starknet::macros::selector;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
 use std::sync::Arc;
+use torii_common::utils::{felt_pair_to_u256, felt_to_u256};
 
 /// Request for fetching an ERC1155 balance at a specific block
 #[derive(Debug, Clone)]
@@ -54,15 +57,20 @@ impl Erc1155BalanceFetcher {
         let calldata = build_balance_of_calldata(wallet, token_id);
 
         let call = FunctionCall {
-            contract_address: contract,
+            contract_address: to_starknet_felt(contract),
             entry_point_selector: selector!("balance_of"),
-            calldata,
+            calldata: calldata.into_iter().map(to_starknet_felt).collect(),
         };
 
         let block_id = BlockId::Number(block_number);
 
         match self.provider.call(call, block_id).await {
-            Ok(result) => Ok(parse_u256_result(&result)),
+            Ok(result) => Ok(parse_u256_result(
+                &result
+                    .into_iter()
+                    .map(from_starknet_felt)
+                    .collect::<Vec<_>>(),
+            )),
             Err(e) => {
                 tracing::warn!(
                     target: "torii_erc1155::balance_fetcher",
@@ -98,9 +106,9 @@ impl Erc1155BalanceFetcher {
                 let calldata = build_balance_of_calldata(req.wallet, req.token_id);
                 ProviderRequestData::Call(CallRequest {
                     request: FunctionCall {
-                        contract_address: req.contract,
+                        contract_address: to_starknet_felt(req.contract),
                         entry_point_selector: selector!("balance_of"),
-                        calldata,
+                        calldata: calldata.into_iter().map(to_starknet_felt).collect(),
                     },
                     block_id: BlockId::Number(req.block_number),
                 })
@@ -119,7 +127,12 @@ impl Erc1155BalanceFetcher {
         for (idx, response) in responses.into_iter().enumerate() {
             let req = &requests[idx];
             let balance = if let ProviderResponseData::Call(felts) = response {
-                parse_u256_result(&felts)
+                parse_u256_result(
+                    &felts
+                        .into_iter()
+                        .map(from_starknet_felt)
+                        .collect::<Vec<_>>(),
+                )
             } else {
                 tracing::warn!(
                     target: "torii_erc1155::balance_fetcher",
@@ -147,9 +160,7 @@ impl Erc1155BalanceFetcher {
 /// Build calldata for balance_of(account, token_id)
 /// ERC1155 expects: [account, token_id_low, token_id_high]
 fn build_balance_of_calldata(wallet: Felt, token_id: U256) -> Vec<Felt> {
-    // Convert U256 to two Felts (low, high)
-    let low = Felt::from(token_id.low());
-    let high = Felt::from(token_id.high());
+    let (low, high) = u256_low_high(token_id);
     vec![wallet, low, high]
 }
 
@@ -161,23 +172,25 @@ fn build_balance_of_calldata(wallet: Felt, token_id: U256) -> Vec<Felt> {
 fn parse_u256_result(result: &[Felt]) -> U256 {
     match result.len() {
         0 => U256::from(0u64),
-        1 => {
-            // Single felt - convert to U256
-            let bytes = result[0].to_bytes_be();
-            let low = u128::from_be_bytes(bytes[16..32].try_into().unwrap());
-            U256::from_words(low, 0)
-        }
-        _ => {
-            // Two felts: [low, high] for u256
-            let low_bytes = result[0].to_bytes_be();
-            let high_bytes = result[1].to_bytes_be();
-
-            let low = u128::from_be_bytes(low_bytes[16..32].try_into().unwrap());
-            let high = u128::from_be_bytes(high_bytes[16..32].try_into().unwrap());
-
-            U256::from_words(low, high)
-        }
+        1 => felt_to_u256(result[0]),
+        _ => felt_pair_to_u256(result[0], result[1]),
     }
+}
+
+fn to_starknet_felt(value: Felt) -> starknet::core::types::Felt {
+    starknet::core::types::Felt::from_bytes_be(&value.to_be_bytes())
+}
+
+fn from_starknet_felt(value: starknet::core::types::Felt) -> Felt {
+    Felt::from_be_bytes_slice(&value.to_bytes_be()).unwrap_or(Felt::ZERO)
+}
+
+fn u256_low_high(value: U256) -> (Felt, Felt) {
+    let [l0, l1, h0, h1] = value.0;
+    (
+        Felt::from_le_words([l0, l1, 0, 0]),
+        Felt::from_le_words([h0, h1, 0, 0]),
+    )
 }
 
 #[cfg(test)]

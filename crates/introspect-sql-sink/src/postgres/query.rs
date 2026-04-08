@@ -9,7 +9,7 @@ use sqlx::prelude::FromRow;
 use sqlx::query::QueryAs;
 use sqlx::types::Json;
 use sqlx::{Arguments, Executor, Postgres};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result as FmtResult, Write};
 use std::rc::Rc;

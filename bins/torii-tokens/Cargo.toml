@@ -17,7 +17,7 @@ torii-runtime-common.workspace = true
 torii-erc20.workspace = true
 torii-erc721.workspace = true
 torii-erc1155.workspace = true
-torii-sql = { workspace = true, optional = true }
+torii-sql = { workspace = true, features = ["postgres", "sqlite"] }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -48,7 +48,7 @@ features = ["flamegraph", "prost-codec"]
 optional = true
 
 [features]
-profiling = ["pprof", "torii-sql"]
+profiling = ["pprof"]
 
 [lints]
 workspace = true

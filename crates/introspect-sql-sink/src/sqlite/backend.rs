@@ -13,7 +13,7 @@ use introspect_types::{ColumnDef, ColumnInfo, PrimaryDef, ResultInto};
 use itertools::Itertools;
 use sqlx::prelude::FromRow;
 use sqlx::types::Json;
-use starknet_types_raw::{Felt, FromStrError};
+use starknet_types_core::felt::{Felt, FromStrError};
 use std::collections::HashMap;
 use torii_introspect::Record;
 use torii_sql::{PoolExt, Queries, Sqlite, SqlitePool, SqliteQuery};

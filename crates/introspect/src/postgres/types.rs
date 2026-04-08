@@ -7,7 +7,7 @@ use sqlx::error::BoxDynError;
 use sqlx::postgres::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef};
 use sqlx::types::{BigDecimal, Json};
 use sqlx::{Decode, Encode, Postgres, Type};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 
 #[derive(sqlx::Type, Debug)]
 #[sqlx(type_name = "introspect.attribute", no_pg_array)]
@@ -137,19 +137,19 @@ impl From<&Attribute> for PgAttribute {
 
 impl From<PgFelt> for Felt {
     fn from(value: PgFelt) -> Self {
-        value.0.into()
+        Felt::from_bytes_be(&value.0)
     }
 }
 
 impl From<Felt> for PgFelt {
     fn from(value: Felt) -> Self {
-        PgFelt(value.to_be_bytes())
+        PgFelt(value.to_bytes_be())
     }
 }
 
 impl From<&Felt> for PgFelt {
     fn from(value: &Felt) -> Self {
-        PgFelt(value.to_be_bytes())
+        PgFelt(value.to_bytes_be())
     }
 }
 
@@ -192,7 +192,7 @@ impl From<&PrimaryDef> for PgPrimary {
 }
 
 pub fn felt252_type(value: &Felt) -> String {
-    format!("'\\x{}'::felt252", hex::encode(value.to_be_bytes()))
+    format!("'\\x{}'::felt252", hex::encode(value.to_bytes_be()))
 }
 
 pub fn felt252_array_type(values: &[Felt]) -> String {

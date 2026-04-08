@@ -6,7 +6,8 @@ use serde::ser::SerializeMap;
 use serde::Serializer;
 use serde_json::{Result as JsonResult, Serializer as JsonSerializer};
 use sqlx::Arguments;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt as RawFelt;
 use std::collections::HashMap;
 use std::fmt::{Display, Write};
 use torii_sql::types::SqlFelt;
@@ -71,8 +72,8 @@ pub fn persist_table_state_query<'a>(
 ) -> TableResult<()> {
     let mut args = SqliteArguments::default();
     args.add(namespace.to_string())?;
-    args.add(Into::<SqlFelt>::into(*id))?;
-    args.add(Into::<SqlFelt>::into(*from_address))?;
+    args.add(SqlFelt::from(RawFelt::from(*id)))?;
+    args.add(SqlFelt::from(RawFelt::from(*from_address)))?;
     args.add(name.to_string())?;
     args.add(serde_json::to_string(primary)?)?;
     args.add(serialize_columns(columns)?)?;

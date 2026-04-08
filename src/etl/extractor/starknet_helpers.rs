@@ -249,7 +249,7 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
         transaction_contexts.push(TransactionContext {
             hash: tx_hash,
             block_number: block_with_receipts.block_number,
-            sender_address: sender_address,
+            sender_address,
             calldata: calldata.into_iter().map(Into::into).collect(),
         });
 
@@ -274,7 +274,7 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
             TransactionReceipt::DeployAccount(deploy_account_receipt) => {
                 deployed_contracts.push(DeployedContract {
                     contract_address: deploy_account_receipt.contract_address.into(),
-                    class_hash: deploy_account_class.map(Into::into).unwrap_or(Felt::ZERO),
+                    class_hash: deploy_account_class.map_or(Felt::ZERO, Into::into),
                     transaction_hash: tx_hash,
                 });
             }
@@ -298,7 +298,7 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
                 block_with_receipts.block_number,
                 tx_hash,
             )
-        }))
+        }));
     }
 
     tracing::debug!(

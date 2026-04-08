@@ -1,5 +1,5 @@
 use introspect_types::{Attribute, ColumnDef, PrimaryDef};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy)]

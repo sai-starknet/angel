@@ -1150,7 +1150,7 @@ impl EcsService {
             .bind(kind.as_str())
             .bind(felt_hex(world_address))
             .bind(felt_hex(table_id))
-            .bind(felt_hex(record.id.into()))
+            .bind(felt_hex(record.id))
             .bind(row_json)
             .bind(executed_at as i64)
             .execute(&self.state.pool)
@@ -1247,8 +1247,8 @@ impl EcsService {
             .await?;
 
         self.publish_event_update(types::Event {
-            keys: keys.iter().map(|felt| felt.into()).collect(),
-            data: data.iter().map(|felt| felt.into()).collect(),
+            keys: keys.iter().map(Into::into).collect(),
+            data: data.iter().map(Into::into).collect(),
             transaction_hash: transaction_hash.into(),
         })
         .await;
@@ -1444,7 +1444,7 @@ impl EcsService {
                 {
                     let mut separated = builder.separated(", ");
                     for address in &query.contract_addresses {
-                        separated.push_bind(Felt::from_be_bytes_slice(&address)?.to_hex_string());
+                        separated.push_bind(felt_hex(Felt::from_be_bytes_slice(address)?));
                     }
                 }
                 builder.push(")");
@@ -1485,7 +1485,7 @@ impl EcsService {
                     .try_get::<Option<String>, _>("last_pending_block_tx")?
                     .map(|value| felt_from_hex(&value))
                     .transpose()?
-                    .map(|felt| felt.into()),
+                    .map(Into::into),
                 updated_at: row.try_get::<i64, _>("updated_at")? as u64,
                 created_at: row.try_get::<i64, _>("created_at")? as u64,
             };
@@ -1522,7 +1522,7 @@ impl EcsService {
             {
                 let mut separated = builder.separated(", ");
                 for address in &query.contract_addresses {
-                    separated.push_bind(format!("{:#066x}", Felt::from_be_bytes_slice(&address)?));
+                    separated.push_bind(felt_hex(Felt::from_be_bytes_slice(address)?));
                 }
             }
             builder.push(")");
@@ -3571,7 +3571,7 @@ impl EcsService {
         for table in models {
             let rows = self.fetch_table_rows(&table).await?;
             let meta = self
-                .load_entity_meta(table.kind, table.world_address, table.table.id)
+                .load_entity_meta(table.kind, table.world_address, table.table.id.into())
                 .await?;
             for row in rows {
                 let entity_id = row
@@ -3959,7 +3959,7 @@ impl EcsService {
         };
         let rows = sqlx::query(&sql)
             .bind(kind.as_str())
-            .bind(felt_hex(world_address)
+            .bind(felt_hex(world_address))
             .bind(felt_hex(entity_id))
             .fetch_all(&self.state.pool)
             .await?;
@@ -4905,8 +4905,8 @@ async fn attach_sqlite_database(
     if !path.exists() {
         fs::File::create(path)?;
     }
-    // sqlite-dynamic-ok: ATTACH requires the database path and schema identifier in SQL text.
     let path = path.to_string_lossy().replace('\'', "''");
+    // sqlite-dynamic-ok: ATTACH requires the database path and schema identifier in SQL text.
     sqlx::query(&format!("ATTACH DATABASE '{path}' AS {schema}"))
         .execute(&mut *conn)
         .await?;
@@ -5044,7 +5044,7 @@ impl CairoTypeSerialization for SnapshotJsonSerializer {
 fn model_from_table(table: &ManagedTable) -> types::Model {
     let (namespace, name) = split_table_name(&table.table.name);
     types::Model {
-        selector: table.table.id.into(),
+        selector: table.table.id.to_bytes_be().to_vec(),
         namespace,
         name,
         packed_size: table.table.columns.len() as u32,
@@ -5054,7 +5054,7 @@ fn model_from_table(table: &ManagedTable) -> types::Model {
         schema: serde_json::to_vec(&table.table).unwrap_or_default(),
         contract_address: Vec::new(),
         use_legacy_store: table.table.legacy,
-        world_address: table.world_address.into(),
+        world_address: Vec::<u8>::from(table.world_address),
     }
 }
 
@@ -5097,7 +5097,7 @@ fn record_to_json_map(
         .columns
         .iter()
         .cloned()
-        .map(|column| (column.id, column))
+        .map(|column| (Felt::from(column.id), column))
         .collect::<HashMap<_, _>>();
     let schema_columns = columns
         .iter()
@@ -5109,9 +5109,10 @@ fn record_to_json_map(
         .collect::<Result<Vec<&ColumnDef>>>()?
         .into_iter()
         .cloned()
-        .map(|column| {
-            let (_, info): (Felt, ColumnInfo) = column.into();
-            info
+        .map(|column| ColumnInfo {
+            name: column.name,
+            attributes: column.attributes,
+            type_def: column.type_def,
         })
         .collect::<Vec<_>>();
     let primary = schema_table.primary.into();
@@ -6267,8 +6268,13 @@ fn contract_matches_query(contract: &types::Contract, query: &types::ContractQue
             || query.contract_types.contains(&contract.contract_type))
 }
 
-fn felt_vec_to_string(value: Vec<u8>) -> String {
-    format!("0x{}", hex::encode(value))
+fn felt_hex<T: Into<Felt>>(value: T) -> String {
+    let value: Felt = value.into();
+    format!("0x{}", hex::encode(<[u8; 32]>::from(value)))
+}
+
+fn felt_from_bytes(value: &[u8]) -> Result<Felt> {
+    Felt::from_be_bytes_slice(value).map_err(|err| anyhow!("invalid felt bytes: {err}"))
 }
 
 fn felt_from_hex(value: &str) -> Result<Felt> {
@@ -6557,7 +6563,7 @@ mod tests {
         .expect("create dojo_columns");
 
         let table = CreateTable {
-            id: table_id,
+            id: table_id.into(),
             name: table_name.to_string(),
             attributes: vec![],
             primary: PrimaryDef {
@@ -6566,7 +6572,7 @@ mod tests {
                 type_def: PrimaryTypeDef::Felt252,
             },
             columns: vec![ColumnDef {
-                id: Felt::from(1_u64),
+                id: Felt::from(1_u64).into(),
                 name: "open".to_string(),
                 attributes: vec![],
                 type_def: TypeDef::Bool,
@@ -6653,7 +6659,7 @@ mod tests {
         .expect("create dojo_columns");
 
         let table = CreateTable {
-            id: table_id,
+            id: table_id.into(),
             name: table_name.to_string(),
             attributes: vec![],
             primary: PrimaryDef {
@@ -6662,7 +6668,7 @@ mod tests {
                 type_def: PrimaryTypeDef::Felt252,
             },
             columns: vec![ColumnDef {
-                id: Felt::from(1_u64),
+                id: Felt::from(1_u64).into(),
                 name: field_name.to_string(),
                 attributes: vec![],
                 type_def: TypeDef::Bool,
@@ -6761,7 +6767,7 @@ mod tests {
         .expect("create dojo_columns");
 
         let table = CreateTable {
-            id: table_id,
+            id: table_id.into(),
             name: table_name.to_string(),
             attributes: vec![],
             primary: PrimaryDef {
@@ -6770,7 +6776,7 @@ mod tests {
                 type_def: PrimaryTypeDef::Felt252,
             },
             columns: vec![ColumnDef {
-                id: Felt::from(1_u64),
+                id: Felt::from(1_u64).into(),
                 name: key_field_name.to_string(),
                 attributes: vec![Attribute::new_empty("key".to_string())],
                 type_def: TypeDef::Felt252,
@@ -7270,7 +7276,7 @@ mod tests {
             .expect("matched frame")
             .expect("matched ok");
         let contract = matched.contract.expect("contract payload");
-        assert_eq!(contract.contract_address, world_contract.into());
+        assert_eq!(contract.contract_address, Vec::<u8>::from(world_contract));
         assert_eq!(contract.contract_type, ContractType::World as i32);
     }
 
@@ -8010,8 +8016,8 @@ mod tests {
             "INSERT INTO erc20.balances (token, wallet, balance, last_block, last_tx_hash)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )
-        .bind(Felt::from(0x99_u64).into())
-        .bind(Felt::from(0x55_u64).into())
+        .bind(Vec::<u8>::from(Felt::from(0x99_u64)))
+        .bind(Vec::<u8>::from(Felt::from(0x55_u64)))
         .bind(vec![1_u8])
         .bind("1")
         .bind(vec![0_u8; 32])
@@ -8037,9 +8043,9 @@ mod tests {
             "INSERT INTO erc721.nft_ownership (token, token_id, owner, block_number, tx_hash, timestamp)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )
-        .bind(Felt::from(0x1137_u64).into())
+        .bind(Vec::<u8>::from(Felt::from(0x1137_u64)))
         .bind(vec![0x04_u8])
-        .bind(Felt::from(0x25145_u64).into())
+        .bind(Vec::<u8>::from(Felt::from(0x25145_u64)))
         .bind("1")
         .bind(vec![1_u8; 32])
         .bind("1774350232")
@@ -8531,8 +8537,8 @@ mod tests {
             "INSERT INTO erc20.balances (token, wallet, balance, last_block, last_tx_hash)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )
-        .bind(Felt::from(0x30_u64).into())
-        .bind(Felt::from(0x10_u64).into())
+        .bind(Vec::<u8>::from(Felt::from(0x30_u64)))
+        .bind(Vec::<u8>::from(Felt::from(0x10_u64)))
         .bind(vec![9_u8])
         .bind("1")
         .bind(vec![0_u8; 32])
@@ -8715,7 +8721,7 @@ mod tests {
         let service = EcsService::new(&db_path, Some(1), None, None, None)
             .await
             .expect("service init");
-        let controller = format!("{:#066x}", Felt::from(0x123_u64));
+        let controller = felt_hex(Felt::from(0x123_u64));
 
         sqlx::query(
             "CREATE TABLE controllers (
@@ -8763,7 +8769,7 @@ mod tests {
         assert!(response.next_cursor.is_empty());
         assert_eq!(
             response.controllers[0].address,
-            Felt::from(0x123_u64).into()
+            Vec::<u8>::from(Felt::from(0x123_u64))
         );
         assert_eq!(response.controllers[0].username, "alice");
         assert_eq!(response.controllers[0].deployed_at_timestamp, 1_710_936_000);
@@ -8796,7 +8802,7 @@ mod tests {
             .await
             .expect("begin controller insert tx");
         for i in 0..1_500_u64 {
-            let controller = format!("{:#066x}", Felt::from(i + 1));
+            let controller = felt_hex(Felt::from(i + 1));
             sqlx::query(
                 "INSERT INTO controllers (id, address, username, deployed_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -8836,14 +8842,14 @@ mod tests {
                 .controllers
                 .first()
                 .map(|controller| controller.address.clone()),
-            Some(Felt::from(1_u64).into())
+            Some(Vec::<u8>::from(Felt::from(1_u64)))
         );
         assert_eq!(
             response
                 .controllers
                 .last()
                 .map(|controller| controller.address.clone()),
-            Some(Felt::from(1_200_u64).into())
+            Some(Vec::<u8>::from(Felt::from(1_200_u64)))
         );
     }
 }

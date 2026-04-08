@@ -5,9 +5,11 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt, U256};
-use starknet::macros::selector;
+use primitive_types::U256;
+use starknet_types_raw::event::EmittedEvent;
+use starknet_types_raw::Felt;
 use torii::etl::extractor::{ExtractionBatch, SyntheticExtractor};
+use torii_types::event::StarknetEvent;
 
 const EXTRACTOR_NAME: &str = "synthetic_erc1155";
 
@@ -239,16 +241,13 @@ impl SyntheticErc1155Extractor {
                     Erc1155EventType::TransferSingle => {
                         let id = self.token_id_for(block_number, tx_index, 0);
                         let value = self.value_for(block_number, tx_index, 0);
+                        let (id_low, id_high) = u256_low_high(id);
+                        let (value_low, value_high) = u256_low_high(value);
 
                         EmittedEvent {
                             from_address: token,
-                            keys: vec![selector!("TransferSingle"), operator, from, to],
-                            data: vec![
-                                Felt::from(id.low()),
-                                Felt::from(id.high()),
-                                Felt::from(value.low()),
-                                Felt::from(value.high()),
-                            ],
+                            keys: vec![Felt::selector("TransferSingle"), operator, from, to],
+                            data: vec![id_low, id_high, value_low, value_high],
                             block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                             block_number: Some(block_number),
                             transaction_hash: tx_hash,
@@ -261,22 +260,24 @@ impl SyntheticErc1155Extractor {
 
                         for i in 0..batch_size {
                             let id = self.token_id_for(block_number, tx_index, i);
-                            ids_data.push(Felt::from(id.low()));
-                            ids_data.push(Felt::from(id.high()));
+                            let (low, high) = u256_low_high(id);
+                            ids_data.push(low);
+                            ids_data.push(high);
                         }
 
                         values_data.push(Felt::from(batch_size as u64));
                         for i in 0..batch_size {
                             let value = self.value_for(block_number, tx_index, i);
-                            values_data.push(Felt::from(value.low()));
-                            values_data.push(Felt::from(value.high()));
+                            let (low, high) = u256_low_high(value);
+                            values_data.push(low);
+                            values_data.push(high);
                         }
 
                         ids_data.extend(values_data);
 
                         EmittedEvent {
                             from_address: token,
-                            keys: vec![selector!("TransferBatch"), operator, from, to],
+                            keys: vec![Felt::selector("TransferBatch"), operator, from, to],
                             data: ids_data,
                             block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                             block_number: Some(block_number),
@@ -285,7 +286,7 @@ impl SyntheticErc1155Extractor {
                     }
                     Erc1155EventType::ApprovalForAll => EmittedEvent {
                         from_address: token,
-                        keys: vec![selector!("ApprovalForAll"), from, to],
+                        keys: vec![Felt::selector("ApprovalForAll"), from, to],
                         data: vec![Felt::from(1u64)],
                         block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                         block_number: Some(block_number),
@@ -294,9 +295,10 @@ impl SyntheticErc1155Extractor {
                     Erc1155EventType::Uri => {
                         let id = self.token_id_for(block_number, tx_index, 0);
                         let uri_felt = Felt::from(0x69706673u64);
+                        let (id_low, _) = u256_low_high(id);
                         EmittedEvent {
                             from_address: token,
-                            keys: vec![selector!("URI"), Felt::from(id.low())],
+                            keys: vec![Felt::selector("URI"), id_low],
                             data: vec![uri_felt],
                             block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                             block_number: Some(block_number),
@@ -304,7 +306,17 @@ impl SyntheticErc1155Extractor {
                         }
                     }
                 };
-                batch.add_event_with_tx_context(event, Some(operator), vec![token, from, to]);
+                batch.add_event_with_tx_context(
+                    StarknetEvent::new(
+                        event.from_address,
+                        event.keys,
+                        event.data,
+                        event.block_number.unwrap_or(0),
+                        event.transaction_hash,
+                    ),
+                    Some(operator),
+                    vec![token, from, to],
+                );
             }
         }
 
@@ -312,6 +324,14 @@ impl SyntheticErc1155Extractor {
         batch.set_chain_head(self.to_block_inclusive());
         batch
     }
+}
+
+fn u256_low_high(value: U256) -> (Felt, Felt) {
+    let [l0, l1, h0, h1] = value.0;
+    (
+        Felt::from_le_words([l0, l1, 0, 0]),
+        Felt::from_le_words([h0, h1, 0, 0]),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -407,10 +427,10 @@ mod tests {
         let mut extractor = SyntheticErc1155Extractor::new(cfg).unwrap();
         let batch = extractor.extract(None).await.unwrap();
 
-        let transfer_single_selector = selector!("TransferSingle");
-        let transfer_batch_selector = selector!("TransferBatch");
-        let approval_for_all_selector = selector!("ApprovalForAll");
-        let uri_selector = selector!("URI");
+        let transfer_single_selector = Felt::selector("TransferSingle");
+        let transfer_batch_selector = Felt::selector("TransferBatch");
+        let approval_for_all_selector = Felt::selector("ApprovalForAll");
+        let uri_selector = Felt::selector("URI");
 
         let mut has_transfer_single = false;
         let mut has_transfer_batch = false;
@@ -451,12 +471,12 @@ mod tests {
         let mut extractor = SyntheticErc1155Extractor::new(cfg).unwrap();
         let batch = extractor.extract(None).await.unwrap();
 
-        let transfer_batch_selector = selector!("TransferBatch");
+        let transfer_batch_selector = Felt::selector("TransferBatch");
         let mut batch_sizes = Vec::new();
 
         for event in &batch.events {
             if event.keys[0] == transfer_batch_selector {
-                let batch_size: usize = event.data[0].try_into().unwrap_or(0);
+                let batch_size = usize::try_from(event.data[0].to_le_words()[0]).unwrap_or(0);
                 batch_sizes.push(batch_size);
             }
         }

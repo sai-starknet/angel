@@ -16,7 +16,7 @@ use torii::etl::engine_db::{EngineDb, EngineDbConfig};
 use torii::etl::extractor::SyntheticExtractor;
 use torii::etl::sink::Sink;
 use torii::etl::{Decoder, DecoderContext};
-use torii_common::{TokenUriResult, TokenUriStore};
+use torii_common::{bytes_to_u256, u256_to_bytes, TokenUriResult, TokenUriStore};
 use torii_erc1155::handlers::{FetchErc1155MetadataCommand, RefreshErc1155TokenUriCommand};
 use torii_erc1155::{
     Erc1155Decoder, Erc1155Sink, Erc1155Storage, SyntheticErc1155Config, SyntheticErc1155Extractor,
@@ -30,6 +30,7 @@ use torii_erc721::{
     Erc721Decoder, Erc721Sink, Erc721Storage, SyntheticErc721Config, SyntheticErc721Extractor,
 };
 use torii_runtime_common::sink::{drop_postgres_schemas, initialize_sink_with_command_handlers};
+use torii_sql::DbPoolOptions;
 
 const SYNTH_COMMAND_QUEUE_SIZE: usize = 4096;
 const SYNTH_METADATA_COMMAND_PARALLELISM: usize = 1;
@@ -162,8 +163,8 @@ impl CommandHandler for SyntheticErc721TokenUriCommandHandler {
 
         self.storage
             .store_token_uri(&TokenUriResult {
-                contract: command.contract,
-                token_id: command.token_id,
+                contract: command.contract.into(),
+                token_id: bytes_to_u256(&u256_to_bytes(command.token_id)),
                 uri: Some(format!(
                     "synthetic://erc721/{:#x}/{}",
                     command.contract, command.token_id
@@ -220,7 +221,7 @@ impl CommandHandler for SyntheticErc1155TokenUriCommandHandler {
         self.storage
             .store_token_uri(&TokenUriResult {
                 contract: command.contract,
-                token_id: command.token_id,
+                token_id: bytes_to_u256(&u256_to_bytes(command.token_id)),
                 uri: Some(format!(
                     "synthetic://erc1155/{:#x}/{}",
                     command.contract, command.token_id
@@ -780,7 +781,10 @@ async fn run_erc1155_profile(config: Erc1155ProfileConfig) -> Result<()> {
     fs::create_dir_all(&output_dir)
         .with_context(|| format!("failed to create output dir {}", output_dir.display()))?;
 
-    let storage = Arc::new(Erc1155Storage::new(&config.common.db_url).await?);
+    let erc1155_pool = DbPoolOptions::new()
+        .connect_any(&config.common.db_url)
+        .await?;
+    let storage = Arc::new(Erc1155Storage::new(erc1155_pool, &config.common.db_url).await?);
 
     let mut sink = Erc1155Sink::new(storage.clone())
         .with_metadata_commands()

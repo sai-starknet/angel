@@ -12,21 +12,18 @@
 //!   fetches the actual balance from the chain and adjusts
 
 use crate::balance_fetcher::Erc1155BalanceFetcher;
-use crate::decoder::{
-    OperatorApproval as DecodedOperatorApproval, TransferBatch as DecodedTransferBatch,
-    TransferSingle as DecodedTransferSingle, UriUpdate as DecodedUriUpdate,
-};
+use crate::decoder::{Erc1155Body as DecodedErc1155Body, Erc1155Message, ERC1155_TYPE_ID};
 use crate::grpc_service::Erc1155Service;
 use crate::handlers::{FetchErc1155MetadataCommand, RefreshErc1155TokenUriCommand};
 use crate::proto;
 use crate::storage::{Erc1155Storage, OperatorApprovalData, TokenTransferData, TokenUriData};
-use anyhow::Result;
 use async_trait::async_trait;
 use axum::Router;
+use primitive_types::U256;
 use prost::Message;
 use prost_types::Any;
-use starknet::core::types::{Felt, U256};
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
+use starknet_types_raw::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -39,6 +36,20 @@ use torii_common::{u256_to_bytes, TokenStandard, TokenUriRequest, TokenUriSender
 /// Default threshold for "live" detection: 100 blocks from chain head.
 /// Events from blocks older than this won't be broadcast to real-time subscribers.
 const LIVE_THRESHOLD_BLOCKS: u64 = 100;
+
+type SinkResult<T> = std::result::Result<T, Erc1155SinkError>;
+
+#[derive(Debug, thiserror::Error)]
+pub enum Erc1155SinkError {
+    #[error("failed to batch insert transfers")]
+    InsertTransfers(#[source] anyhow::Error),
+    #[error("failed to batch insert operator approvals")]
+    InsertOperatorApprovals(#[source] anyhow::Error),
+    #[error("failed to batch upsert token URI updates")]
+    UpsertTokenUriUpdates(#[source] anyhow::Error),
+    #[error("failed to encode ERC1155 protobuf payload")]
+    Encode(#[from] prost::EncodeError),
+}
 
 /// ERC1155 token sink
 ///
@@ -214,35 +225,23 @@ impl Erc1155Sink {
 
         false
     }
-}
 
-#[async_trait]
-impl Sink for Erc1155Sink {
-    fn name(&self) -> &'static str {
-        "erc1155"
-    }
-
-    fn interested_types(&self) -> Vec<TypeId> {
-        vec![
-            TypeId::new("erc1155.transfer_single"),
-            TypeId::new("erc1155.transfer_batch"),
-            TypeId::new("erc1155.approval_for_all"),
-            TypeId::new("erc1155.uri"),
-        ]
-    }
-
-    async fn initialize(
+    async fn initialize_sink(
         &mut self,
         event_bus: Arc<EventBus>,
         context: &torii::etl::sink::SinkContext,
-    ) -> Result<()> {
+    ) -> SinkResult<()> {
         self.event_bus = Some(event_bus);
         self.command_bus = Some(context.command_bus.clone());
         tracing::info!(target: "torii_erc1155::sink", "ERC1155 sink initialized");
         Ok(())
     }
 
-    async fn process(&self, envelopes: &[Envelope], batch: &ExtractionBatch) -> Result<()> {
+    async fn process_sink(
+        &self,
+        envelopes: &[Envelope],
+        batch: &ExtractionBatch,
+    ) -> SinkResult<()> {
         let mut transfers: Vec<TokenTransferData> = Vec::with_capacity(envelopes.len());
         let mut operator_approvals: Vec<OperatorApprovalData> = Vec::with_capacity(envelopes.len());
         let mut uri_updates: Vec<TokenUriData> = Vec::with_capacity(envelopes.len());
@@ -258,86 +257,53 @@ impl Sink for Erc1155Sink {
             .collect();
 
         for envelope in envelopes {
-            // Handle single transfers
-            if envelope.type_id == TypeId::new("erc1155.transfer_single") {
-                if let Some(transfer) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedTransferSingle>()
-                {
-                    let timestamp = block_timestamps.get(&transfer.block_number).copied();
-                    transfers.push(TokenTransferData {
-                        id: None,
-                        token: transfer.token,
-                        operator: transfer.operator,
-                        from: transfer.from,
-                        to: transfer.to,
-                        token_id: transfer.id,
-                        amount: transfer.value,
-                        is_batch: false,
-                        batch_index: 0,
-                        block_number: transfer.block_number,
-                        tx_hash: transfer.transaction_hash,
-                        timestamp,
-                    });
-                }
+            if envelope.type_id != ERC1155_TYPE_ID {
+                continue;
             }
-            // Handle batch transfers
-            else if envelope.type_id == TypeId::new("erc1155.transfer_batch") {
-                if let Some(transfer) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedTransferBatch>()
-                {
-                    let timestamp = block_timestamps.get(&transfer.block_number).copied();
-                    transfers.push(TokenTransferData {
-                        id: None,
-                        token: transfer.token,
-                        operator: transfer.operator,
-                        from: transfer.from,
-                        to: transfer.to,
-                        token_id: transfer.id,
-                        amount: transfer.value,
-                        is_batch: true,
-                        batch_index: transfer.batch_index,
-                        block_number: transfer.block_number,
-                        tx_hash: transfer.transaction_hash,
-                        timestamp,
-                    });
-                }
-            }
-            // Handle approval for all
-            else if envelope.type_id == TypeId::new("erc1155.approval_for_all") {
-                if let Some(approval) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedOperatorApproval>()
-                {
-                    let timestamp = block_timestamps.get(&approval.block_number).copied();
-                    operator_approvals.push(OperatorApprovalData {
-                        id: None,
-                        token: approval.token,
-                        owner: approval.owner,
-                        operator: approval.operator,
-                        approved: approval.approved,
-                        block_number: approval.block_number,
-                        tx_hash: approval.transaction_hash,
-                        timestamp,
-                    });
-                }
-            }
-            // Handle URI updates
-            else if envelope.type_id == TypeId::new("erc1155.uri") {
-                if let Some(uri) = envelope.body.as_any().downcast_ref::<DecodedUriUpdate>() {
-                    let timestamp = block_timestamps.get(&uri.block_number).copied();
-                    uri_updates.push(TokenUriData {
-                        token: uri.token,
-                        token_id: uri.token_id,
-                        uri: uri.uri.clone(),
-                        block_number: uri.block_number,
-                        tx_hash: uri.transaction_hash,
-                        timestamp,
-                    });
+
+            if let Some(body) = envelope.body.as_any().downcast_ref::<DecodedErc1155Body>() {
+                match &body.msg {
+                    Erc1155Message::Transfer(transfer) => {
+                        let timestamp = block_timestamps.get(&transfer.block_number).copied();
+                        transfers.push(TokenTransferData {
+                            id: None,
+                            token: transfer.token,
+                            operator: transfer.operator,
+                            from: transfer.from,
+                            to: transfer.to,
+                            token_id: transfer.token_id,
+                            amount: transfer.amount,
+                            is_batch: transfer.is_batch,
+                            batch_index: transfer.batch_index,
+                            block_number: transfer.block_number,
+                            tx_hash: transfer.transaction_hash,
+                            timestamp,
+                        });
+                    }
+                    Erc1155Message::ApprovalForAll(approval) => {
+                        let timestamp = block_timestamps.get(&approval.block_number).copied();
+                        operator_approvals.push(OperatorApprovalData {
+                            id: None,
+                            token: approval.token,
+                            owner: approval.owner,
+                            operator: approval.operator,
+                            approved: approval.approved,
+                            block_number: approval.block_number,
+                            tx_hash: approval.transaction_hash,
+                            timestamp,
+                        });
+                    }
+                    Erc1155Message::Uri(uri) => {
+                        let timestamp = block_timestamps.get(&uri.block_number).copied();
+                        uri_updates.push(TokenUriData {
+                            token: uri.token,
+                            token_id: uri.token_id,
+                            uri: uri.uri.clone(),
+                            block_number: uri.block_number,
+                            tx_hash: uri.transaction_hash,
+                            timestamp,
+                        });
+                    }
                 }
             }
         }
@@ -449,14 +415,14 @@ impl Sink for Erc1155Sink {
         if !transfers.is_empty() {
             let transfer_count = match self.storage.insert_transfers_batch(&transfers).await {
                 Ok(count) => count,
-                Err(e) => {
+                Err(error) => {
                     tracing::error!(
                         target: "torii_erc1155::sink",
                         count = transfers.len(),
-                        error = %e,
+                        error = %error,
                         "Failed to batch insert transfers"
                     );
-                    return Err(e);
+                    return Err(Erc1155SinkError::InsertTransfers(error));
                 }
             };
 
@@ -471,9 +437,7 @@ impl Sink for Erc1155Sink {
                     "Batch inserted token transfers"
                 );
 
-                // Update balances if balance tracking is enabled
                 if let Some(ref fetcher) = self.balance_fetcher {
-                    // Step 1: Check which balances need adjustment (would go negative)
                     let adjustment_requests = match self
                         .storage
                         .check_balances_batch(&transfers)
@@ -490,7 +454,6 @@ impl Sink for Erc1155Sink {
                         }
                     };
 
-                    // Step 2: Batch fetch actual balances from RPC for inconsistent wallets
                     let mut adjustments: HashMap<(Felt, Felt, U256), U256> = HashMap::new();
                     if !adjustment_requests.is_empty() {
                         tracing::info!(
@@ -511,7 +474,6 @@ impl Sink for Erc1155Sink {
                                     error = %e,
                                     "Failed to fetch balances from RPC, using 0 for adjustments"
                                 );
-                                // On failure, use 0 for all requested adjustments
                                 for req in &adjustment_requests {
                                     adjustments.insert(
                                         (req.contract, req.wallet, req.token_id),
@@ -522,7 +484,6 @@ impl Sink for Erc1155Sink {
                         }
                     }
 
-                    // Step 3: Apply transfers with adjustments to update balances
                     if let Err(e) = self
                         .storage
                         .apply_transfers_with_adjustments(&transfers, &adjustments)
@@ -533,30 +494,26 @@ impl Sink for Erc1155Sink {
                             error = %e,
                             "Failed to apply balance updates"
                         );
-                        // Don't fail the whole batch - transfers are already inserted
                     }
                 }
 
-                // Only broadcast to real-time subscribers when near chain head
                 let is_live = batch.is_live(LIVE_THRESHOLD_BLOCKS);
                 if is_live {
-                    // Publish transfer events
                     for transfer in &transfers {
                         let proto_transfer = proto::TokenTransfer {
-                            token: transfer.token.to_bytes_be().to_vec(),
-                            operator: transfer.operator.to_bytes_be().to_vec(),
-                            from: transfer.from.to_bytes_be().to_vec(),
-                            to: transfer.to.to_bytes_be().to_vec(),
+                            token: transfer.token.to_be_bytes_vec(),
+                            operator: transfer.operator.to_be_bytes_vec(),
+                            from: transfer.from.to_be_bytes_vec(),
+                            to: transfer.to.to_be_bytes_vec(),
                             token_id: u256_to_bytes(transfer.token_id),
                             amount: u256_to_bytes(transfer.amount),
                             block_number: transfer.block_number,
-                            tx_hash: transfer.tx_hash.to_bytes_be().to_vec(),
+                            tx_hash: transfer.tx_hash.to_be_bytes_vec(),
                             timestamp: transfer.timestamp.unwrap_or(0),
                             is_batch: transfer.is_batch,
                             batch_index: transfer.batch_index,
                         };
 
-                        // Publish to EventBus
                         if let Some(event_bus) = &self.event_bus {
                             let mut buf = Vec::new();
                             proto_transfer.encode(&mut buf)?;
@@ -576,7 +533,6 @@ impl Sink for Erc1155Sink {
                             );
                         }
 
-                        // Broadcast to gRPC service
                         if let Some(grpc_service) = &self.grpc_service {
                             grpc_service.broadcast_transfer(proto_transfer);
                         }
@@ -585,7 +541,6 @@ impl Sink for Erc1155Sink {
             }
         }
 
-        // Batch insert operator approvals
         if !operator_approvals.is_empty() {
             match self
                 .storage
@@ -603,19 +558,18 @@ impl Sink for Erc1155Sink {
                         "Batch inserted operator approvals"
                     );
                 }
-                Err(e) => {
+                Err(error) => {
                     tracing::error!(
                         target: "torii_erc1155::sink",
-                        "Failed to batch insert {} operator approvals: {}",
-                        operator_approvals.len(),
-                        e
+                        count = operator_approvals.len(),
+                        error = %error,
+                        "Failed to batch insert operator approvals"
                     );
-                    return Err(e);
+                    return Err(Erc1155SinkError::InsertOperatorApprovals(error));
                 }
             }
         }
 
-        // Batch upsert token URI updates
         if !uri_updates.is_empty() {
             match self.storage.upsert_token_uris_batch(&uri_updates).await {
                 Ok(count) => {
@@ -629,11 +583,10 @@ impl Sink for Erc1155Sink {
                         "Batch upserted token URI updates"
                     );
 
-                    // Publish URI updates to topic subscribers
                     if let Some(event_bus) = &self.event_bus {
                         for uri in &uri_updates {
                             let proto_uri = proto::TokenUri {
-                                token: uri.token.to_bytes_be().to_vec(),
+                                token: uri.token.to_be_bytes_vec(),
                                 token_id: u256_to_bytes(uri.token_id),
                                 uri: uri.uri.clone(),
                                 block_number: uri.block_number,
@@ -658,19 +611,18 @@ impl Sink for Erc1155Sink {
                         }
                     }
                 }
-                Err(e) => {
+                Err(error) => {
                     tracing::error!(
                         target: "torii_erc1155::sink",
                         count = uri_updates.len(),
-                        error = %e,
+                        error = %error,
                         "Failed to batch upsert token URI updates"
                     );
-                    return Err(e);
+                    return Err(Erc1155SinkError::UpsertTokenUriUpdates(error));
                 }
             }
         }
 
-        // Log combined statistics without full-table scans.
         if inserted_transfers > 0 || inserted_operator_approvals > 0 || inserted_uri_updates > 0 {
             tracing::info!(
                 target: "torii_erc1155::sink",
@@ -686,6 +638,33 @@ impl Sink for Erc1155Sink {
         }
 
         Ok(())
+    }
+}
+
+#[async_trait]
+impl Sink for Erc1155Sink {
+    fn name(&self) -> &'static str {
+        "erc1155"
+    }
+
+    fn interested_types(&self) -> Vec<TypeId> {
+        vec![ERC1155_TYPE_ID]
+    }
+
+    async fn initialize(
+        &mut self,
+        event_bus: Arc<EventBus>,
+        context: &torii::etl::sink::SinkContext,
+    ) -> anyhow::Result<()> {
+        self.initialize_sink(event_bus, context)
+            .await
+            .map_err(Into::into)
+    }
+
+    async fn process(&self, envelopes: &[Envelope], batch: &ExtractionBatch) -> anyhow::Result<()> {
+        self.process_sink(envelopes, batch)
+            .await
+            .map_err(Into::into)
     }
 
     fn topics(&self) -> Vec<TopicInfo> {

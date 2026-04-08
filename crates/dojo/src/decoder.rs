@@ -17,7 +17,8 @@ use introspect_types::{
     SliceFeltSource,
 };
 use itertools::Itertools;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt as RawFelt;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::RwLock;
@@ -46,6 +47,10 @@ where
         Ok(event) => Ok(event),
         Err(err) => Err(DojoToriiError::EventDeserializationError(T::NAME, err)),
     }
+}
+
+fn raw_to_core(raw: RawFelt) -> Felt {
+    raw.into()
 }
 
 #[async_trait]
@@ -168,14 +173,11 @@ where
         schema: DojoSchema,
         context: EventContext,
     ) -> DojoToriiResult<CreateTable> {
+        let owner = raw_to_core(context.from_address);
+        let tx_hash = raw_to_core(context.transaction_hash);
         let full_table = DojoTable::from_schema(schema, namespace, name, dojo_primary_def());
-        self.save_table(
-            context.from_address,
-            &full_table,
-            context.transaction_hash,
-            context.block_number,
-        )
-        .await?;
+        self.save_table(owner, &full_table, tx_hash, context.block_number)
+            .await?;
         let (id, table) = full_table.clone().into();
         {
             if let Some(existing) = self.tables.read()?.get(&id) {
@@ -189,7 +191,7 @@ where
         self.tables.write()?.insert(id, table);
         Ok(CreateTable::from_schema(
             full_table.into(),
-            self.append_only.contains(&(context.from_address, id)),
+            self.append_only.contains(&(owner, id)),
         ))
     }
 
@@ -199,6 +201,8 @@ where
         schema: DojoSchema,
         context: EventContext,
     ) -> DojoToriiResult<TableSchema> {
+        let owner = raw_to_core(context.from_address);
+        let tx_hash = raw_to_core(context.transaction_hash);
         let mut info = {
             let mut tables = self.tables.write()?;
             match tables.remove(&id) {
@@ -211,13 +215,8 @@ where
         info.key_fields = key_fields;
         info.value_fields = value_fields;
         let table = (id, info).into();
-        self.save_table(
-            context.from_address,
-            &table,
-            context.transaction_hash,
-            context.block_number,
-        )
-        .await?;
+        self.save_table(owner, &table, tx_hash, context.block_number)
+            .await?;
         let (_, info) = table.clone().into();
         self.tables.write()?.insert(id, info);
         Ok(table.to_schema())
@@ -268,36 +267,37 @@ where
         data: &[Felt],
         context: EventContext,
     ) -> DojoToriiResult<IntrospectMsg> {
-        match selector {
-            ModelRegistered::SELECTOR => {
+        let selector_raw = selector.to_raw();
+        match selector_raw {
+            ModelRegistered::SELECTOR_RAW => {
                 self.process_table_event::<ModelRegistered>(keys, data, context)
                     .await
             }
-            ModelWithSchemaRegistered::SELECTOR => {
+            ModelWithSchemaRegistered::SELECTOR_RAW => {
                 self.process_table_event::<ModelWithSchemaRegistered>(keys, data, context)
                     .await
             }
-            ModelUpgraded::SELECTOR => {
+            ModelUpgraded::SELECTOR_RAW => {
                 self.process_table_event::<ModelUpgraded>(keys, data, context)
                     .await
             }
-            EventRegistered::SELECTOR => {
+            EventRegistered::SELECTOR_RAW => {
                 self.process_table_event::<EventRegistered>(keys, data, context)
                     .await
             }
-            EventUpgraded::SELECTOR => {
+            EventUpgraded::SELECTOR_RAW => {
                 self.process_table_event::<EventUpgraded>(keys, data, context)
                     .await
             }
-            StoreSetRecord::SELECTOR => self.process_record_event::<StoreSetRecord>(keys, data),
-            StoreUpdateRecord::SELECTOR => {
+            StoreSetRecord::SELECTOR_RAW => self.process_record_event::<StoreSetRecord>(keys, data),
+            StoreUpdateRecord::SELECTOR_RAW => {
                 self.process_record_event::<StoreUpdateRecord>(keys, data)
             }
-            StoreUpdateMember::SELECTOR => {
+            StoreUpdateMember::SELECTOR_RAW => {
                 self.process_record_event::<StoreUpdateMember>(keys, data)
             }
-            StoreDelRecord::SELECTOR => self.process_record_event::<StoreDelRecord>(keys, data),
-            EventEmitted::SELECTOR => self.process_record_event::<EventEmitted>(keys, data),
+            StoreDelRecord::SELECTOR_RAW => self.process_record_event::<StoreDelRecord>(keys, data),
+            EventEmitted::SELECTOR_RAW => self.process_record_event::<EventEmitted>(keys, data),
             _ => Err(DojoToriiError::UnknownDojoEventSelector(selector)),
         }
     }
@@ -351,23 +351,26 @@ where
 
     async fn decode(
         &self,
-        keys: &[Felt],
-        data: &[Felt],
+        keys: &[RawFelt],
+        data: &[RawFelt],
         context: EventContext,
     ) -> AnyResult<Vec<Envelope>> {
         let (&selector, keys) = keys
             .split_first()
             .ok_or(DojoToriiError::MissingEventSelector)?;
+        let selector = raw_to_core(selector);
+        let keys: Vec<Felt> = keys.iter().copied().map(raw_to_core).collect();
+        let data: Vec<Felt> = data.iter().copied().map(raw_to_core).collect();
 
         if selector == ExternalContractRegisteredEvent::SELECTOR {
             return self
-                .process_external_contract_event(keys, data)
+                .process_external_contract_event(&keys, &data)
                 .map(|msg| msg.to_envelopes(context))
                 .err_into();
         }
 
         match self
-            .event_with_selector_to_msg(selector, keys, data, context)
+            .event_with_selector_to_msg(selector, &keys, &data, context)
             .await
         {
             Ok(msg) => msg.to_ok_envelopes(context),
@@ -467,8 +470,8 @@ mod tests {
                     (3, "armor", false),
                 ]),
                 EventContext {
-                    from_address: owner,
-                    transaction_hash: Felt::ZERO,
+                    from_address: owner.into(),
+                    transaction_hash: Felt::ZERO.into(),
                     block_number: 42,
                 },
             )
@@ -494,15 +497,15 @@ mod tests {
         keys.push(Felt::from_hex("0x99").unwrap());
 
         let event = StarknetEvent {
-            from_address: Felt::from_hex("0x1").unwrap(),
-            keys,
+            from_address: Felt::from_hex("0x1").unwrap().into(),
+            keys: keys.into_iter().map(Into::into).collect(),
             data: vec![
-                Felt::from_hex("0xabc").unwrap(),
-                Felt::from_hex("0x1234").unwrap(),
-                Felt::from(42_u64),
+                Felt::from_hex("0xabc").unwrap().into(),
+                Felt::from_hex("0x1234").unwrap().into(),
+                Felt::from(42_u64).into(),
             ],
             block_number: 42,
-            transaction_hash: Felt::from_hex("0xbeef").unwrap(),
+            transaction_hash: Felt::from_hex("0xbeef").unwrap().into(),
         };
 
         let envelopes = decoder.decode_event(&event).await.unwrap();
@@ -518,6 +521,9 @@ mod tests {
         assert_eq!(body.msg.class_hash, Felt::from_hex("0xabc").unwrap());
         assert_eq!(body.msg.contract_address, Felt::from_hex("0x1234").unwrap());
         assert_eq!(body.msg.registration_block, 42);
-        assert_eq!(body.context.from_address, Felt::from_hex("0x1").unwrap());
+        assert_eq!(
+            body.context.from_address,
+            Felt::from_hex("0x1").unwrap().into()
+        );
     }
 }

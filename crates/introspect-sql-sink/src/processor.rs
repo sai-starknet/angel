@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use introspect_types::{ColumnInfo, PrimaryDef, TypeDef};
 use itertools::Itertools;
 use sqlx::{Database, Pool};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use torii_introspect::events::{IntrospectBody, IntrospectMsg};
@@ -207,14 +207,16 @@ pub fn messages_to_queries<DB: IntrospectQueryMaker>(
     let mut results = Vec::with_capacity(msgs.len());
     for body in msgs {
         let (msg, metadata) = body.into();
-        let namespace = namespaces.to_namespace(&metadata.from_address)?;
+        let from_address: Felt = metadata.from_address.into();
+        let transaction_hash: Felt = metadata.transaction_hash.into();
+        let namespace = namespaces.to_namespace(&from_address)?;
         results.push(handle_message::<DB>(
             namespace,
             tables,
             msg,
-            &metadata.from_address,
+            &from_address,
             metadata.block_number,
-            &metadata.transaction_hash,
+            &transaction_hash,
             queries,
         ));
     }

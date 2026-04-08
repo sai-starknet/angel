@@ -14,13 +14,14 @@ use anyhow::Result;
 use axum::Router;
 use prost::Message;
 use prost_types::Any;
-use starknet::core::types::EmittedEvent;
+use starknet_types_raw::Felt;
 use std::sync::Arc;
 use torii::etl::envelope::{Envelope, TypeId, TypedBody};
 use torii::etl::extractor::ExtractionBatch;
 use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
-use torii::etl::Decoder;
+use torii::etl::{Decoder, EventContext};
 use torii::{async_trait, run, ToriiConfig, UpdateType};
+use torii_types::event::StarknetEvent;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 1. DEFINE EVENT TYPE
@@ -70,24 +71,20 @@ impl BroadcastSink {
         Self { event_bus: None }
     }
 
-    pub fn generate_sample_events() -> Vec<EmittedEvent> {
-        use starknet::core::types::Felt;
-
+    pub fn generate_sample_events() -> Vec<StarknetEvent> {
         vec![
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from_hex("0x1234567890abcdef").unwrap(),
                 keys: vec![Felt::from_hex("0x1").unwrap()],
                 data: vec![Felt::from_hex("0x100").unwrap()],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from_hex("0xfedcba0987654321").unwrap(),
                 keys: vec![Felt::from_hex("0x2").unwrap()],
                 data: vec![Felt::from_hex("0x200").unwrap()],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
         ]
@@ -189,15 +186,20 @@ impl Decoder for BroadcastDecoder {
         "broadcast"
     }
 
-    async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(
+        &self,
+        _keys: &[Felt],
+        _data: &[Felt],
+        context: EventContext,
+    ) -> Result<Vec<Envelope>> {
         let broadcast_event = BroadcastEvent {
-            event_id: format!("{:#x}", event.transaction_hash),
-            from_address: format!("{:#x}", event.from_address),
-            block_number: event.block_number.unwrap_or(0),
+            event_id: format!("{:#x}", context.transaction_hash),
+            from_address: format!("{:#x}", context.from_address),
+            block_number: context.block_number,
         };
 
         Ok(vec![Envelope::new(
-            format!("broadcast_{:#x}", event.transaction_hash),
+            format!("broadcast_{:#x}", context.transaction_hash),
             Box::new(broadcast_event),
             Default::default(),
         )])

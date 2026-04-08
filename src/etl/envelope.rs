@@ -157,7 +157,7 @@ impl<T> From<EventBody<T>> for (T, EventContext) {
 impl<T> From<(T, EventContext)> for EventBody<T> {
     fn from(value: (T, EventContext)) -> Self {
         let (msg, context) = value;
-        EventBody { msg, context }
+        EventBody { context, msg }
     }
 }
 

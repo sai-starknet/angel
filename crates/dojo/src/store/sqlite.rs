@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqliteArguments;
 use sqlx::{Arguments, FromRow, Sqlite, SqlitePool};
-use starknet_types_raw::error::OverflowError;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
+use starknet_types_raw::{error::OverflowError, Felt as RawFelt};
 use std::collections::HashMap;
 use std::io;
 use std::ops::Deref;
@@ -89,9 +89,13 @@ fn parse_felt_json_array(value: &str) -> Result<Vec<Felt>, DojoSqliteStoreError>
         .collect()
 }
 
+fn felt_from_bytes(value: &[u8]) -> Result<Felt, DojoSqliteStoreError> {
+    Ok(RawFelt::from_be_bytes_slice(value)?.into())
+}
+
 fn table_row_into_table(value: TableRow) -> Result<DojoTable, DojoSqliteStoreError> {
     Ok(DojoTable {
-        id: Felt::from_be_bytes_slice(&value.id)?,
+        id: felt_from_bytes(&value.id)?,
         name: value.name,
         attributes: serde_json::from_str(&value.attributes)?,
         primary: primary_field_def(),
@@ -109,8 +113,8 @@ where
     let payload: StoredColumnInfo = serde_json::from_str(&value.payload)?;
     Ok((
         K::from_parts(
-            Felt::from_be_bytes_slice(&value.table_id)?,
-            Felt::from_be_bytes_slice(&value.id)?,
+            felt_from_bytes(&value.table_id)?,
+            felt_from_bytes(&value.id)?,
         ),
         ColumnInfo {
             name: payload.name,
@@ -120,7 +124,7 @@ where
     ))
 }
 
-fn select_table_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) {
+fn select_table_query(owners: &[Felt]) -> (String, SqliteArguments<'_>) {
     let mut query = String::from(
         "SELECT id, name, attributes, keys_json, values_json, legacy FROM dojo_tables",
     );
@@ -132,14 +136,14 @@ fn select_table_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) {
                 query.push_str(", ");
             }
             query.push('?');
-            let _ = args.add(owner.as_be_bytes_slice());
+            let _ = args.add(owner.to_bytes_be().to_vec());
         }
         query.push(')');
     }
     (query, args)
 }
 
-fn select_column_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) {
+fn select_column_query(owners: &[Felt]) -> (String, SqliteArguments<'_>) {
     let mut query = String::from("SELECT table_id, id, payload FROM dojo_columns");
     let mut args = SqliteArguments::default();
     if !owners.is_empty() {
@@ -149,7 +153,7 @@ fn select_column_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) 
                 query.push_str(", ");
             }
             query.push('?');
-            let _ = args.add(owner.as_be_bytes_slice());
+            let _ = args.add(owner.to_bytes_be().to_vec());
         }
         query.push(')');
     }
@@ -222,8 +226,8 @@ impl DojoStoreTrait for SqlitePool {
                 updated_tx = excluded.updated_tx
             ",
         )
-        .bind(owner.as_be_bytes_slice())
-        .bind(table.id.as_be_bytes_slice())
+        .bind(owner.to_bytes_be().to_vec())
+        .bind(table.id.to_bytes_be().to_vec())
         .bind(&table.name)
         .bind(serde_json::to_string(&table.attributes)?)
         .bind(serialize_felt_json_array(&table.key_fields)?)
@@ -231,8 +235,8 @@ impl DojoStoreTrait for SqlitePool {
         .bind(table.legacy)
         .bind(block_number as i64)
         .bind(block_number as i64)
-        .bind(tx_hash.as_be_bytes_slice())
-        .bind(tx_hash.as_be_bytes_slice())
+        .bind(tx_hash.to_bytes_be().to_vec())
+        .bind(tx_hash.to_bytes_be().to_vec())
         .execute(&mut *transaction)
         .await
         .map_err(DojoToriiError::store_error)?;
@@ -251,9 +255,9 @@ impl DojoStoreTrait for SqlitePool {
                     payload = excluded.payload
                 ",
             )
-            .bind(owner.as_be_bytes_slice())
-            .bind(table.id.as_be_bytes_slice())
-            .bind(id.as_be_bytes_slice())
+            .bind(owner.to_bytes_be().to_vec())
+            .bind(table.id.to_bytes_be().to_vec())
+            .bind(id.to_bytes_be().to_vec())
             .bind(serde_json::to_string(&payload)?)
             .execute(&mut *transaction)
             .await

@@ -172,7 +172,7 @@ impl SyntheticIntrospectExtractor {
     }
 
     fn table_id(&self) -> Felt {
-        compute_selector_from_namespace_and_name(NAMESPACE, MODEL_NAME)
+        compute_selector_from_namespace_and_name(NAMESPACE, MODEL_NAME).into()
     }
 
     fn score_selector(&self) -> Felt {
@@ -180,15 +180,23 @@ impl SyntheticIntrospectExtractor {
     }
 
     fn model_registration_event(&self, block_number: u64) -> StarknetEvent {
-        let mut keys = vec![ModelWithSchemaRegistered::SELECTOR];
-        keys.extend(string_to_cairo_serialize_byte_array(MODEL_NAME));
-        keys.extend(string_to_cairo_serialize_byte_array(NAMESPACE));
+        let mut keys = vec![ModelWithSchemaRegistered::SELECTOR.into()];
+        keys.extend(
+            string_to_cairo_serialize_byte_array(MODEL_NAME)
+                .into_iter()
+                .map(Felt::from),
+        );
+        keys.extend(
+            string_to_cairo_serialize_byte_array(NAMESPACE)
+                .into_iter()
+                .map(Felt::from),
+        );
 
         StarknetEvent {
             from_address: FROM_ADDRESS,
             keys,
             data: encode_legacy_schema(),
-            block_number: block_number,
+            block_number,
             transaction_hash: tx_hash_for(block_number, 0),
         }
     }
@@ -225,9 +233,9 @@ impl SyntheticIntrospectExtractor {
 
         StarknetEvent {
             from_address: FROM_ADDRESS,
-            keys: vec![StoreSetRecord::SELECTOR, self.table_id(), entity_id],
+            keys: vec![StoreSetRecord::SELECTOR.into(), self.table_id(), entity_id],
             data,
-            block_number: block_number,
+            block_number,
             transaction_hash: tx_hash_for(block_number, record_tx_index(record_index, false)),
         }
     }
@@ -242,13 +250,13 @@ impl SyntheticIntrospectExtractor {
         StarknetEvent {
             from_address: FROM_ADDRESS,
             keys: vec![
-                StoreUpdateMember::SELECTOR,
+                StoreUpdateMember::SELECTOR.into(),
                 self.table_id(),
                 entity_id,
                 self.score_selector(),
             ],
             data: encode_array([final_score]),
-            block_number: block_number,
+            block_number,
             transaction_hash: tx_hash_for(block_number, record_tx_index(record_index, true)),
         }
     }
@@ -394,7 +402,10 @@ struct NeverFetchSchema;
 
 #[async_trait]
 impl DojoSchemaFetcher for NeverFetchSchema {
-    async fn schema(&self, contract_address: Felt) -> DojoIntrospectResult<DojoSchema> {
+    async fn schema(
+        &self,
+        contract_address: starknet::core::types::Felt,
+    ) -> DojoIntrospectResult<DojoSchema> {
         panic!("provider fetch should not be called in synthetic introspect run: {contract_address:#x}");
     }
 }
@@ -557,7 +568,7 @@ async fn verify_run(pool: &PgPool, config: &Config) -> Result<Verification> {
     )
     .bind(
         compute_selector_from_namespace_and_name(NAMESPACE, MODEL_NAME)
-            .to_be_bytes()
+            .to_bytes_be()
             .to_vec(),
     )
     .fetch_one(pool)
@@ -662,9 +673,9 @@ fn encode_columns() -> Vec<Felt> {
     columns.extend(encode_column(
         "owner",
         &["key"],
-        primitive::CONTRACT_ADDRESS_FELT,
+        primitive::CONTRACT_ADDRESS_FELT.into(),
     ));
-    columns.extend(encode_column("score", &[], primitive::U32_FELT));
+    columns.extend(encode_column("score", &[], primitive::U32_FELT.into()));
     columns
 }
 

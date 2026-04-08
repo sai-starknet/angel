@@ -20,7 +20,8 @@
 //! use torii_erc1155::proto::erc1155_server::Erc1155Server;
 //!
 //! // Create storage
-//! let storage = Arc::new(Erc1155Storage::new("./erc1155.db")?);
+//! let pool = torii_sql::DbPoolOptions::new().connect_any("./erc1155.db").await?;
+//! let storage = Arc::new(Erc1155Storage::new(pool, "./erc1155.db").await?);
 //!
 //! // Create gRPC service
 //! let grpc_service = Erc1155Service::new(storage.clone());
@@ -55,7 +56,10 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/erc1155_descrip
 
 // Re-export main types for convenience
 pub use balance_fetcher::{Erc1155BalanceFetchRequest, Erc1155BalanceFetcher};
-pub use decoder::{Erc1155Decoder, OperatorApproval, TransferBatch, TransferSingle, UriUpdate};
+pub use decoder::{
+    Erc1155Body, Erc1155Decoder, Erc1155Message, OperatorApproval, TransferData, UriUpdate,
+    ERC1155_TYPE_ID,
+};
 pub use grpc_service::Erc1155Service;
 pub use handlers::{Erc1155MetadataCommandHandler, Erc1155TokenUriCommandHandler};
 pub use identification::Erc1155Rule;

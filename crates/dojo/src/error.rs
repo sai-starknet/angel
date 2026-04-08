@@ -2,7 +2,7 @@ use dojo_introspect::DojoIntrospectError;
 use introspect_types::transcode::TranscodeError;
 use introspect_types::DecodeError;
 use starknet::core::utils::NonAsciiNameError;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::error::Error as StdError;
 use std::sync::PoisonError;
 

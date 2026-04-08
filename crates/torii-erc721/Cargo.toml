@@ -8,6 +8,7 @@ description = "ERC721 NFT token indexer library for Torii"
 # Torii core
 torii = { path = "../.." }
 torii-common = { path = "../torii-common" }
+torii-sql = { path = "../sql", features = ["postgres", "sqlite"] }
 
 # Async
 tokio = { version = "1", features = ["full"] }
@@ -15,6 +16,8 @@ async-trait = "0.1"
 
 # Starknet
 starknet = "0.17"
+starknet-types-raw.workspace = true
+primitive-types.workspace = true
 
 # Storage
 rusqlite = { version = "0.32", features = ["bundled"] }

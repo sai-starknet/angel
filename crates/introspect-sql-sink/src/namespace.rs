@@ -2,7 +2,7 @@ use crate::error::{NamespaceError, NamespaceResult};
 use crate::{DbError, DbResult};
 use introspect_types::ResultInto;
 use itertools::Itertools;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::hash::{Hash, Hasher};

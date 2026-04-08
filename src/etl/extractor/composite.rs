@@ -167,15 +167,15 @@ impl Extractor for CompositeExtractor {
 mod tests {
     use super::*;
     use crate::etl::extractor::SampleExtractor;
-    use starknet::core::types::{EmittedEvent, Felt};
+    use starknet_types_raw::Felt;
+    use torii_types::event::StarknetEvent;
 
     fn make_sample_extractor() -> SampleExtractor {
-        let events = vec![EmittedEvent {
+        let events = vec![StarknetEvent {
             from_address: Felt::from(1u64),
             keys: vec![Felt::from(100u64)],
             data: vec![Felt::from(1000u64)],
-            block_hash: None,
-            block_number: None,
+            block_number: 0,
             transaction_hash: Felt::ZERO,
         }];
         SampleExtractor::new(events, 1)

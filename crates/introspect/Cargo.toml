@@ -10,6 +10,7 @@ introspect-types.workspace = true
 introspect-rust-macros.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+starknet-types-core.workspace = true
 starknet-types-raw.workspace = true
 torii.workspace = true
 blake3.workspace = true

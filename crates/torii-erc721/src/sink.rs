@@ -1,9 +1,7 @@
 //! ERC721 sink for processing NFT transfers, approvals, and ownership
 
-use crate::decoder::{
-    BatchMetadataUpdate as DecodedBatchMetadataUpdate, MetadataUpdate as DecodedMetadataUpdate,
-    NftTransfer as DecodedNftTransfer, OperatorApproval as DecodedOperatorApproval,
-};
+use crate::conversions::{core_to_primitive_u256, core_to_raw_felt, u256_to_bytes};
+use crate::decoder::{Erc721Body, Erc721Msg, ERC721_TYPE};
 use crate::grpc_service::Erc721Service;
 use crate::handlers::{FetchErc721MetadataCommand, RefreshErc721TokenUriCommand};
 use crate::proto;
@@ -22,7 +20,7 @@ use torii::command::CommandBusSender;
 use torii::etl::sink::{EventBus, TopicInfo};
 use torii::etl::{Envelope, ExtractionBatch, Sink, TypeId};
 use torii::grpc::UpdateType;
-use torii_common::{u256_to_bytes, TokenStandard, TokenUriRequest, TokenUriSender};
+use torii_common::{TokenStandard, TokenUriRequest, TokenUriSender};
 
 /// Default threshold for "live" detection: 100 blocks from chain head.
 /// Events from blocks older than this won't be broadcast to real-time subscribers.
@@ -135,8 +133,8 @@ impl Erc721Sink {
     fn enqueue_token_uri_request(&self, contract: Felt, token_id: U256) -> bool {
         if let Some(sender) = &self.token_uri_sender {
             return sender.request_update(TokenUriRequest {
-                contract,
-                token_id,
+                contract: core_to_raw_felt(contract),
+                token_id: core_to_primitive_u256(token_id),
                 standard: TokenStandard::Erc721,
             });
         }
@@ -174,7 +172,16 @@ impl Erc721Sink {
             .collect::<Vec<_>>();
 
         if let Some(sender) = &self.token_uri_sender {
-            let accepted = sender.request_batch(contract, &token_ids, TokenStandard::Erc721);
+            let primitive_token_ids = token_ids
+                .iter()
+                .copied()
+                .map(core_to_primitive_u256)
+                .collect::<Vec<_>>();
+            let accepted = sender.request_batch(
+                core_to_raw_felt(contract),
+                &primitive_token_ids,
+                TokenStandard::Erc721,
+            );
             if accepted != token_ids.len() {
                 tracing::warn!(
                     target: "torii_erc721::sink",
@@ -200,13 +207,7 @@ impl Sink for Erc721Sink {
     }
 
     fn interested_types(&self) -> Vec<TypeId> {
-        vec![
-            TypeId::new("erc721.transfer"),
-            TypeId::new("erc721.approval"),
-            TypeId::new("erc721.approval_for_all"),
-            TypeId::new("erc721.metadata_update"),
-            TypeId::new("erc721.batch_metadata_update"),
-        ]
+        vec![ERC721_TYPE]
     }
 
     async fn initialize(
@@ -234,10 +235,16 @@ impl Sink for Erc721Sink {
             .collect();
 
         for envelope in envelopes {
-            // Handle transfers
-            if envelope.type_id == TypeId::new("erc721.transfer") {
-                if let Some(transfer) = envelope.body.as_any().downcast_ref::<DecodedNftTransfer>()
-                {
+            if envelope.type_id != ERC721_TYPE {
+                continue;
+            }
+
+            let Some(body) = envelope.body.as_any().downcast_ref::<Erc721Body>() else {
+                continue;
+            };
+
+            match &body.msg {
+                Erc721Msg::Transfer(transfer) => {
                     let timestamp = block_timestamps.get(&transfer.block_number).copied();
                     transfers.push(NftTransferData {
                         id: None,
@@ -250,14 +257,7 @@ impl Sink for Erc721Sink {
                         timestamp,
                     });
                 }
-            }
-            // Handle approval for all
-            else if envelope.type_id == TypeId::new("erc721.approval_for_all") {
-                if let Some(approval) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedOperatorApproval>()
-                {
+                Erc721Msg::ApprovalForAll(approval) => {
                     let timestamp = block_timestamps.get(&approval.block_number).copied();
                     operator_approvals.push(OperatorApprovalData {
                         id: None,
@@ -270,26 +270,12 @@ impl Sink for Erc721Sink {
                         timestamp,
                     });
                 }
-            }
-            // Handle MetadataUpdate (EIP-4906) — single token
-            else if envelope.type_id == TypeId::new("erc721.metadata_update") {
-                if let Some(update) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedMetadataUpdate>()
-                {
+                Erc721Msg::MetadataUpdate(update) => {
                     if self.token_uri_commands_enabled {
                         self.enqueue_token_uri_request(update.token, update.token_id);
                     }
                 }
-            }
-            // Handle BatchMetadataUpdate (EIP-4906) — range of tokens
-            else if envelope.type_id == TypeId::new("erc721.batch_metadata_update") {
-                if let Some(update) = envelope
-                    .body
-                    .as_any()
-                    .downcast_ref::<DecodedBatchMetadataUpdate>()
-                {
+                Erc721Msg::BatchMetadataUpdate(update) => {
                     if self.token_uri_commands_enabled {
                         self.enqueue_token_uri_range_refresh(
                             update.token,
@@ -299,9 +285,10 @@ impl Sink for Erc721Sink {
                         .await;
                     }
                 }
+                Erc721Msg::Approval(_) => {
+                    // Single-token approvals are decoded for completeness but not stored yet.
+                }
             }
-            // Note: erc721.approval (single token approval) could be handled similarly
-            // but is less commonly needed for indexing purposes
         }
 
         // Fetch metadata for any new token contracts.

@@ -3,7 +3,7 @@ use crate::{DojoTable, DojoToriiResult};
 use async_trait::async_trait;
 use introspect_types::ResultInto;
 use serde_json::Error as JsonError;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::fs;
 use std::path::PathBuf;
 use torii_common::json::JsonFs;

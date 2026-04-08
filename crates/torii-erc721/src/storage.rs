@@ -3,15 +3,15 @@
 //! Uses binary (BLOB) storage for efficiency.
 //! Tracks current NFT ownership state (who owns each token).
 
+use crate::conversions::{blob_to_felt, blob_to_u256, felt_to_blob, u256_to_blob};
 use anyhow::Result;
 use rusqlite::{params, params_from_iter, Connection, ToSql};
 use starknet::core::types::{Felt, U256};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio_postgres::{types::ToSql as PgToSql, Client, NoTls};
-use torii_common::{
-    blob_to_felt, blob_to_u256, felt_to_blob, u256_to_blob, TokenUriResult, TokenUriStore,
-};
+use torii_common::{TokenUriResult, TokenUriStore};
+use torii_sql::{DbPool, DbPoolOptions};
 
 const SQLITE_MAX_BIND_VARS: usize = 900;
 const SQLITE_TOKEN_BATCH_SIZE: usize = SQLITE_MAX_BIND_VARS;
@@ -19,9 +19,40 @@ const SQLITE_TOKEN_PAIR_BATCH_SIZE: usize = SQLITE_MAX_BIND_VARS / 2;
 
 /// Storage for ERC721 NFT data
 pub struct Erc721Storage {
-    backend: StorageBackend,
+    db: Erc721Db<DbPool>,
+}
+
+struct Erc721Db<Backend> {
+    backend: Backend,
+    runtime: StorageRuntime,
+}
+
+enum StorageRuntime {
+    Sqlite(SqliteStorageRuntime),
+    Postgres(PostgresStorageRuntime),
+}
+
+struct SqliteStorageRuntime {
     conn: Arc<Mutex<Connection>>,
-    pg_conn: Option<Arc<tokio::sync::Mutex<Client>>>,
+}
+
+struct PostgresStorageRuntime {
+    conn: Arc<tokio::sync::Mutex<Client>>,
+}
+
+impl<Backend> Erc721Db<Backend> {
+    fn new(backend: Backend, runtime: StorageRuntime) -> Self {
+        Self { backend, runtime }
+    }
+}
+
+impl StorageRuntime {
+    fn backend(&self) -> StorageBackend {
+        match self {
+            Self::Sqlite(_) => StorageBackend::Sqlite,
+            Self::Postgres(_) => StorageBackend::Postgres,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -113,7 +144,18 @@ struct ResolvedFacetFilter {
 impl Erc721Storage {
     /// Create or open the database
     pub async fn new(db_path: &str) -> Result<Self> {
-        if db_path.starts_with("postgres://") || db_path.starts_with("postgresql://") {
+        let pool = Self::connect_pool(db_path).await?;
+        Self::from_pool(db_path, pool).await
+    }
+
+    pub async fn connect_pool(db_path: &str) -> Result<DbPool> {
+        Ok(DbPoolOptions::new()
+            .connect_any(&db_pool_url(db_path))
+            .await?)
+    }
+
+    pub async fn from_pool(db_path: &str, pool: DbPool) -> Result<Self> {
+        let runtime = if matches!(pool, DbPool::Postgres(_)) {
             let (client, connection) = tokio_postgres::connect(db_path, NoTls).await?;
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
@@ -251,33 +293,30 @@ impl Erc721Storage {
             ).await?;
 
             tracing::info!(target: "torii_erc721::storage", "PostgreSQL storage initialized");
-            return Ok(Self {
-                backend: StorageBackend::Postgres,
-                conn: Arc::new(Mutex::new(Connection::open_in_memory()?)),
-                pg_conn: Some(Arc::new(tokio::sync::Mutex::new(client))),
-            });
-        }
+            StorageRuntime::Postgres(PostgresStorageRuntime {
+                conn: Arc::new(tokio::sync::Mutex::new(client)),
+            })
+        } else {
+            let conn = Connection::open(db_path)?;
 
-        let conn = Connection::open(db_path)?;
+            // Enable WAL mode + Performance PRAGMAs
+            conn.execute_batch(
+                "PRAGMA journal_mode=WAL;
+                 PRAGMA synchronous=NORMAL;
+                 PRAGMA foreign_keys=ON;
+                 PRAGMA cache_size=-64000;
+                 PRAGMA temp_store=MEMORY;
+                 PRAGMA mmap_size=268435456;
+                 PRAGMA wal_autocheckpoint=10000;
+                 PRAGMA page_size=4096;
+                 PRAGMA busy_timeout=5000;",
+            )?;
 
-        // Enable WAL mode + Performance PRAGMAs
-        conn.execute_batch(
-            "PRAGMA journal_mode=WAL;
-             PRAGMA synchronous=NORMAL;
-             PRAGMA foreign_keys=ON;
-             PRAGMA cache_size=-64000;
-             PRAGMA temp_store=MEMORY;
-             PRAGMA mmap_size=268435456;
-             PRAGMA wal_autocheckpoint=10000;
-             PRAGMA page_size=4096;
-             PRAGMA busy_timeout=5000;",
-        )?;
+            tracing::info!(target: "torii_erc721::storage", "SQLite configured: WAL mode, 64MB cache, 256MB mmap, NORMAL sync");
 
-        tracing::info!(target: "torii_erc721::storage", "SQLite configured: WAL mode, 64MB cache, 256MB mmap, NORMAL sync");
-
-        // NFT ownership (current state) - one owner per NFT
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS nft_ownership (
+            // NFT ownership (current state) - one owner per NFT
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nft_ownership (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token BLOB NOT NULL,
                 token_id BLOB NOT NULL,
@@ -287,34 +326,34 @@ impl Erc721Storage {
                 timestamp TEXT,
                 UNIQUE(token, token_id)
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_ownership_owner ON nft_ownership(owner)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_ownership_owner ON nft_ownership(owner)",
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_ownership_token ON nft_ownership(token)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_ownership_token ON nft_ownership(token)",
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_ownership_token_owner_token_id_ord
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_ownership_token_owner_token_id_ord
              ON nft_ownership(token, owner, length(token_id), token_id)",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_ownership_owner_token_token_id_ord
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_ownership_owner_token_token_id_ord
              ON nft_ownership(owner, token, length(token_id), token_id)",
-            [],
-        )?;
+                [],
+            )?;
 
-        // Transfer history
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS nft_transfers (
+            // Transfer history
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nft_transfers (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token BLOB NOT NULL,
                 token_id BLOB NOT NULL,
@@ -325,37 +364,37 @@ impl Erc721Storage {
                 timestamp TEXT,
                 UNIQUE(token, tx_hash, token_id, from_addr, to_addr)
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_transfers_token ON nft_transfers(token)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_transfers_token ON nft_transfers(token)",
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_transfers_from ON nft_transfers(from_addr)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_transfers_from ON nft_transfers(from_addr)",
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_transfers_to ON nft_transfers(to_addr)",
-            [],
-        )?;
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_transfers_to ON nft_transfers(to_addr)",
+                [],
+            )?;
 
-        conn.execute(
+            conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_nft_transfers_block ON nft_transfers(block_number DESC)",
             [],
         )?;
 
-        conn.execute(
+            conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_nft_transfers_token_id ON nft_transfers(token, token_id)",
             [],
         )?;
 
-        // Wallet activity table for efficient OR queries
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS nft_wallet_activity (
+            // Wallet activity table for efficient OR queries
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nft_wallet_activity (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 wallet_address BLOB NOT NULL,
                 token BLOB NOT NULL,
@@ -364,24 +403,24 @@ impl Erc721Storage {
                 block_number TEXT NOT NULL,
                 FOREIGN KEY (transfer_id) REFERENCES nft_transfers(id)
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_wallet_activity_wallet_block
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_wallet_activity_wallet_block
              ON nft_wallet_activity(wallet_address, block_number DESC)",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_nft_wallet_activity_wallet_token
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_nft_wallet_activity_wallet_token
              ON nft_wallet_activity(wallet_address, token, block_number DESC)",
-            [],
-        )?;
+                [],
+            )?;
 
-        // Approvals (single token)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS nft_approvals (
+            // Approvals (single token)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nft_approvals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token BLOB NOT NULL,
                 token_id BLOB NOT NULL,
@@ -391,12 +430,12 @@ impl Erc721Storage {
                 tx_hash BLOB NOT NULL,
                 timestamp TEXT
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        // Operator approvals (all tokens)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS nft_operators (
+            // Operator approvals (all tokens)
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS nft_operators (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 token BLOB NOT NULL,
                 owner BLOB NOT NULL,
@@ -407,21 +446,21 @@ impl Erc721Storage {
                 timestamp TEXT,
                 UNIQUE(token, owner, operator)
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        // Token metadata table
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS token_metadata (
+            // Token metadata table
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS token_metadata (
                 token BLOB PRIMARY KEY,
                 name TEXT,
                 symbol TEXT,
                 total_supply BLOB
             )",
-            [],
-        )?;
+                [],
+            )?;
 
-        conn.execute_batch(
+            conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS token_uris (
                 token BLOB NOT NULL,
                 token_id BLOB NOT NULL,
@@ -480,25 +519,54 @@ impl Erc721Storage {
             CREATE INDEX IF NOT EXISTS idx_facet_token_map_token_token_id_key_value ON facet_token_map(token, token_id, facet_key_id, facet_value_id);",
         )?;
 
-        tracing::info!(target: "torii_erc721::storage", db_path = %db_path, "ERC721 database initialized");
+            tracing::info!(target: "torii_erc721::storage", db_path = %db_path, "ERC721 database initialized");
+
+            StorageRuntime::Sqlite(SqliteStorageRuntime {
+                conn: Arc::new(Mutex::new(conn)),
+            })
+        };
 
         Ok(Self {
-            backend: StorageBackend::Sqlite,
-            conn: Arc::new(Mutex::new(conn)),
-            pg_conn: None,
+            db: Erc721Db::new(pool, runtime),
         })
+    }
+
+    pub fn pool(&self) -> &DbPool {
+        &self.db.backend
+    }
+
+    fn is_postgres(&self) -> bool {
+        self.db.runtime.backend() == StorageBackend::Postgres
+    }
+
+    fn sqlite_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
+        match &self.db.runtime {
+            StorageRuntime::Sqlite(runtime) => Ok(runtime.conn.lock().unwrap()),
+            StorageRuntime::Postgres(_) => Err(anyhow::anyhow!(
+                "SQLite connection not initialized for ERC721 storage"
+            )),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_sqlite_conn<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, rusqlite::Error>,
+    ) -> Result<T> {
+        let conn = self.sqlite_conn()?;
+        Ok(f(&conn)?)
     }
 
     /// Insert multiple transfers and update ownership in a single transaction
     pub async fn insert_transfers_batch(&self, transfers: &[NftTransferData]) -> Result<usize> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_insert_transfers_batch(transfers).await;
         }
         if transfers.is_empty() {
             return Ok(0);
         }
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.sqlite_conn()?;
         let tx = conn.transaction()?;
 
         let mut inserted = 0;
@@ -602,14 +670,14 @@ impl Erc721Storage {
         &self,
         approvals: &[OperatorApprovalData],
     ) -> Result<usize> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_insert_operator_approvals_batch(approvals).await;
         }
         if approvals.is_empty() {
             return Ok(0);
         }
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.sqlite_conn()?;
         let tx = conn.transaction()?;
 
         let mut inserted = 0;
@@ -657,14 +725,14 @@ impl Erc721Storage {
         cursor: Option<TransferCursor>,
         limit: u32,
     ) -> Result<(Vec<NftTransferData>, Option<TransferCursor>)> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self
                 .pg_get_transfers_filtered(
                     wallet, from, to, tokens, token_ids, block_from, block_to, cursor, limit,
                 )
                 .await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
 
         let mut query = String::new();
         let mut params_vec: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
@@ -781,10 +849,10 @@ impl Erc721Storage {
 
     /// Get current owner of a specific NFT
     pub async fn get_owner(&self, token: Felt, token_id: U256) -> Result<Option<Felt>> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_owner(token, token_id).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
 
         let result: Result<Vec<u8>, _> = conn.query_row(
             "SELECT owner FROM nft_ownership WHERE token = ? AND token_id = ?",
@@ -807,12 +875,12 @@ impl Erc721Storage {
         cursor: Option<OwnershipCursor>,
         limit: u32,
     ) -> Result<(Vec<NftOwnershipData>, Option<OwnershipCursor>)> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self
                 .pg_get_ownership_by_owner(owner, tokens, cursor, limit)
                 .await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
 
         let mut query = String::from(
             "SELECT id, token, token_id, owner, block_number FROM nft_ownership WHERE owner = ?",
@@ -890,7 +958,7 @@ impl Erc721Storage {
         let page_fetch = page_limit as i64 + 1;
         let facet_limit = facet_limit.clamp(1, 1000) as i64;
 
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             let resolved_filters = self.pg_resolve_facet_filters(token, &filters).await?;
             let Some(resolved_filters) = resolved_filters else {
                 return Ok(TokenAttributeQueryResult {
@@ -912,7 +980,7 @@ impl Erc721Storage {
                 .await;
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let resolved_filters = self.sqlite_resolve_facet_filters(&conn, token, &filters)?;
         let Some(resolved_filters) = resolved_filters else {
             return Ok(TokenAttributeQueryResult {
@@ -936,10 +1004,10 @@ impl Erc721Storage {
 
     /// Get transfer count
     pub async fn get_transfer_count(&self) -> Result<u64> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_transfer_count().await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let count: i64 =
             conn.query_row("SELECT COUNT(*) FROM nft_transfers", [], |row| row.get(0))?;
         Ok(count as u64)
@@ -947,10 +1015,10 @@ impl Erc721Storage {
 
     /// Get unique token contract count
     pub async fn get_token_count(&self) -> Result<u64> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_token_count().await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let count: i64 = conn.query_row(
             "SELECT COUNT(DISTINCT token) FROM nft_transfers",
             [],
@@ -961,10 +1029,10 @@ impl Erc721Storage {
 
     /// Get unique NFT count
     pub async fn get_nft_count(&self) -> Result<u64> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_nft_count().await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let count: i64 =
             conn.query_row("SELECT COUNT(*) FROM nft_ownership", [], |row| row.get(0))?;
         Ok(count as u64)
@@ -972,10 +1040,10 @@ impl Erc721Storage {
 
     /// Get latest block number indexed
     pub async fn get_latest_block(&self) -> Result<Option<u64>> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_latest_block().await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let block: Option<String> = conn
             .query_row("SELECT MAX(block_number) FROM nft_transfers", [], |row| {
                 row.get(0)
@@ -989,10 +1057,10 @@ impl Erc721Storage {
 
     /// Check if metadata exists for a token
     pub async fn has_token_metadata(&self, token: Felt) -> Result<bool> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_has_token_metadata(token).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let count: i64 = conn.query_row(
             "SELECT COUNT(*) FROM token_metadata
@@ -1012,11 +1080,11 @@ impl Erc721Storage {
         if tokens.is_empty() {
             return Ok(HashSet::new());
         }
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_has_token_metadata_batch(tokens).await;
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let mut existing = HashSet::with_capacity(tokens.len());
 
         for chunk in tokens.chunks(SQLITE_TOKEN_BATCH_SIZE) {
@@ -1054,12 +1122,12 @@ impl Erc721Storage {
         symbol: Option<&str>,
         total_supply: Option<U256>,
     ) -> Result<()> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self
                 .pg_upsert_token_metadata(token, name, symbol, total_supply)
                 .await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let supply_blob = total_supply.map(u256_to_blob);
         conn.execute(
@@ -1079,10 +1147,10 @@ impl Erc721Storage {
         &self,
         token: Felt,
     ) -> Result<Option<(Option<String>, Option<String>, Option<U256>)>> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_token_metadata(token).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let result = conn
             .query_row(
@@ -1103,7 +1171,7 @@ impl Erc721Storage {
     pub async fn get_all_token_metadata(
         &self,
     ) -> Result<Vec<(Felt, Option<String>, Option<String>, Option<U256>)>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let mut stmt =
             conn.prepare_cached("SELECT token, name, symbol, total_supply FROM token_metadata")?;
         let rows = stmt.query_map([], |row| {
@@ -1132,10 +1200,10 @@ impl Erc721Storage {
         Vec<(Felt, Option<String>, Option<String>, Option<U256>)>,
         Option<Felt>,
     )> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_token_metadata_paginated(cursor, limit).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let fetch_limit = limit.clamp(1, 1000) as usize + 1;
 
         let mut out = if let Some(cursor_token) = cursor {
@@ -1196,10 +1264,10 @@ impl Erc721Storage {
 
     /// Returns true if a token URI row exists for `(token, token_id)`.
     pub async fn has_token_uri(&self, token: Felt, token_id: U256) -> Result<bool> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_has_token_uri(token, token_id).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let token_id_blob = u256_to_blob(token_id);
         let count: i64 = conn.query_row(
@@ -1219,11 +1287,11 @@ impl Erc721Storage {
         if tokens.is_empty() {
             return Ok(HashSet::new());
         }
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_has_token_uri_batch(tokens).await;
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let mut existing = HashSet::with_capacity(tokens.len());
 
         for chunk in tokens.chunks(SQLITE_TOKEN_PAIR_BATCH_SIZE) {
@@ -1256,10 +1324,10 @@ impl Erc721Storage {
         &self,
         token: Felt,
     ) -> Result<Vec<(U256, Option<String>, Option<String>)>> {
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_token_uris_by_contract(token).await;
         }
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let mut stmt = conn.prepare_cached(
             "SELECT token_id, uri, metadata_json
@@ -1284,11 +1352,11 @@ impl Erc721Storage {
         if token_ids.is_empty() {
             return Ok(Vec::new());
         }
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             return self.pg_get_token_uris_batch(token, token_ids).await;
         }
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.sqlite_conn()?;
         let token_blob = felt_to_blob(token);
         let mut rows_out = Vec::new();
         for chunk in token_ids.chunks(SQLITE_TOKEN_BATCH_SIZE) {
@@ -1319,11 +1387,12 @@ impl Erc721Storage {
     }
 
     async fn pg_client(&self) -> Result<tokio::sync::MutexGuard<'_, Client>> {
-        let conn = self
-            .pg_conn
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("PostgreSQL connection not initialized"))?;
-        Ok(conn.lock().await)
+        match &self.db.runtime {
+            StorageRuntime::Postgres(runtime) => Ok(runtime.conn.lock().await),
+            StorageRuntime::Sqlite(_) => {
+                Err(anyhow::anyhow!("PostgreSQL connection not initialized"))
+            }
+        }
     }
 
     fn pg_next_param(
@@ -2329,6 +2398,21 @@ impl Erc721Storage {
     }
 }
 
+fn db_pool_url(db_path: &str) -> String {
+    if db_path == ":memory:" || db_path == "sqlite::memory:" {
+        return "sqlite::memory:".to_owned();
+    }
+
+    if db_path.starts_with("postgres://")
+        || db_path.starts_with("postgresql://")
+        || db_path.starts_with("sqlite:")
+    {
+        return db_path.to_owned();
+    }
+
+    format!("sqlite://{db_path}?mode=rwc")
+}
+
 #[async_trait::async_trait]
 impl TokenUriStore for Erc721Storage {
     async fn store_token_uris_batch(&self, results: &[TokenUriResult]) -> Result<()> {
@@ -2342,14 +2426,14 @@ impl TokenUriStore for Erc721Storage {
             .collect::<Vec<_>>();
         let token_blobs = results
             .iter()
-            .map(|result| felt_to_blob(result.contract))
+            .map(|result| result.contract.to_be_bytes_vec())
             .collect::<Vec<_>>();
         let token_id_blobs = results
             .iter()
-            .map(|result| u256_to_blob(result.token_id))
+            .map(|result| result.token_id.to_big_endian().to_vec())
             .collect::<Vec<_>>();
 
-        if self.backend == StorageBackend::Postgres {
+        if self.is_postgres() {
             let mut client = self.pg_client().await?;
             let mut changed_indexes = Vec::new();
             for (idx, result) in results.iter().enumerate() {
@@ -2429,7 +2513,7 @@ impl TokenUriStore for Erc721Storage {
             return Ok(());
         }
 
-        let mut conn = self.conn.lock().unwrap();
+        let mut conn = self.sqlite_conn()?;
         let mut changed_indexes = Vec::new();
         for (idx, result) in results.iter().enumerate() {
             if !sqlite_token_uri_state_matches(&conn, result, &expected_attributes[idx])? {
@@ -2942,8 +3026,8 @@ fn sqlite_token_uri_state_matches(
     result: &TokenUriResult,
     expected_attributes: &[(String, String)],
 ) -> Result<bool> {
-    let token_blob = felt_to_blob(result.contract);
-    let token_id_blob = u256_to_blob(result.token_id);
+    let token_blob = result.contract.to_be_bytes_vec();
+    let token_id_blob = result.token_id.to_big_endian().to_vec();
     let row = conn.query_row(
         "SELECT uri, metadata_json FROM token_uris WHERE token = ?1 AND token_id = ?2",
         params![&token_blob, &token_id_blob],
@@ -2984,8 +3068,8 @@ async fn pg_token_uri_state_matches(
     result: &TokenUriResult,
     expected_attributes: &[(String, String)],
 ) -> Result<bool> {
-    let token_blob = felt_to_blob(result.contract);
-    let token_id_blob = u256_to_blob(result.token_id);
+    let token_blob = result.contract.to_be_bytes_vec();
+    let token_id_blob = result.token_id.to_big_endian().to_vec();
     let row = client
         .query_opt(
             "SELECT uri, metadata_json FROM erc721.token_uris WHERE token = $1 AND token_id = $2",
@@ -3033,6 +3117,16 @@ fn sanitize_metadata_text(input: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn raw_contract() -> starknet_types_raw::Felt {
+        starknet_types_raw::Felt::from_hex_unchecked(
+            "0x046da8955829adf2bda310099a0063451923f02e648cf25a1203aac6335cf0e4",
+        )
+    }
+
+    fn primitive_token_id(value: u64) -> primitive_types::U256 {
+        primitive_types::U256::from(value)
+    }
+
     fn temp_db_path(test_name: &str) -> String {
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -3078,10 +3172,8 @@ mod tests {
         let db_path = temp_db_path("token-uri-noop");
         let storage = Erc721Storage::new(&db_path).await.expect("create storage");
         let result = TokenUriResult {
-            contract: Felt::from_hex_unchecked(
-                "0x046da8955829adf2bda310099a0063451923f02e648cf25a1203aac6335cf0e4",
-            ),
-            token_id: U256::from(1u64),
+            contract: raw_contract(),
+            token_id: primitive_token_id(1),
             uri: Some("ipfs://beasts/1".to_owned()),
             metadata_json: Some(
                 r#"{"name":"Beast #1","attributes":[{"trait_type":"Class","value":"Wolf"}]}"#
@@ -3094,38 +3186,45 @@ mod tests {
             .await
             .expect("insert token uri");
 
-        {
-            let conn = storage.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE token_uris SET updated_at = '123' WHERE token = ?1 AND token_id = ?2",
-                params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
-            )
+        storage
+            .with_sqlite_conn(|conn| {
+                conn.execute(
+                    "UPDATE token_uris SET updated_at = '123' WHERE token = ?1 AND token_id = ?2",
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
+                )?;
+                Ok(())
+            })
             .expect("set sentinel updated_at");
-        }
 
         storage
             .store_token_uri(&result)
             .await
             .expect("store unchanged token uri");
 
-        let (updated_at, attr_count): (String, i64) = {
-            let conn = storage.conn.lock().unwrap();
-            let updated_at: String = conn
-                .query_row(
+        let (updated_at, attr_count): (String, i64) = storage
+            .with_sqlite_conn(|conn| {
+                let updated_at: String = conn.query_row(
                     "SELECT updated_at FROM token_uris WHERE token = ?1 AND token_id = ?2",
-                    params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
                     |row| row.get(0),
-                )
-                .expect("read updated_at");
-            let attr_count: i64 = conn
-                .query_row(
+                )?;
+                let attr_count: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM token_attributes WHERE token = ?1 AND token_id = ?2",
-                    params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
                     |row| row.get(0),
-                )
-                .expect("count attributes");
-            (updated_at, attr_count)
-        };
+                )?;
+                Ok((updated_at, attr_count))
+            })
+            .expect("read sqlite assertions");
 
         assert_eq!(updated_at, "123");
         assert_eq!(attr_count, 1);
@@ -3138,10 +3237,8 @@ mod tests {
         let db_path = temp_db_path("token-uri-backfill");
         let storage = Erc721Storage::new(&db_path).await.expect("create storage");
         let result = TokenUriResult {
-            contract: Felt::from_hex_unchecked(
-                "0x046da8955829adf2bda310099a0063451923f02e648cf25a1203aac6335cf0e4",
-            ),
-            token_id: U256::from(2u64),
+            contract: raw_contract(),
+            token_id: primitive_token_id(2),
             uri: Some("ipfs://beasts/2".to_owned()),
             metadata_json: Some(
                 r#"{"name":"Beast #2","attributes":[{"trait_type":"Class","value":"Bear"}]}"#
@@ -3154,29 +3251,36 @@ mod tests {
             .await
             .expect("insert token uri");
 
-        {
-            let conn = storage.conn.lock().unwrap();
-            conn.execute(
-                "DELETE FROM token_attributes WHERE token = ?1 AND token_id = ?2",
-                params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
-            )
+        storage
+            .with_sqlite_conn(|conn| {
+                conn.execute(
+                    "DELETE FROM token_attributes WHERE token = ?1 AND token_id = ?2",
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
+                )?;
+                Ok(())
+            })
             .expect("delete attributes");
-        }
 
         storage
             .store_token_uri(&result)
             .await
             .expect("repair missing attributes");
 
-        let attr_count: i64 = {
-            let conn = storage.conn.lock().unwrap();
-            conn.query_row(
-                "SELECT COUNT(*) FROM token_attributes WHERE token = ?1 AND token_id = ?2",
-                params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
-                |row| row.get(0),
-            )
-            .expect("count attributes")
-        };
+        let attr_count: i64 = storage
+            .with_sqlite_conn(|conn| {
+                conn.query_row(
+                    "SELECT COUNT(*) FROM token_attributes WHERE token = ?1 AND token_id = ?2",
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
+                    |row| row.get(0),
+                )
+            })
+            .expect("count attributes");
 
         assert_eq!(attr_count, 1);
 
@@ -3188,10 +3292,8 @@ mod tests {
         let db_path = temp_db_path("token-uri-facet-backfill");
         let storage = Erc721Storage::new(&db_path).await.expect("create storage");
         let result = TokenUriResult {
-            contract: Felt::from_hex_unchecked(
-                "0x046da8955829adf2bda310099a0063451923f02e648cf25a1203aac6335cf0e4",
-            ),
-            token_id: U256::from(3u64),
+            contract: raw_contract(),
+            token_id: primitive_token_id(3),
             uri: Some("ipfs://beasts/3".to_owned()),
             metadata_json: Some(
                 r#"{"name":"Beast #3","attributes":[{"trait_type":"Class","value":"Wolf"},{"trait_type":"Color","value":"Red"}]}"#
@@ -3204,45 +3306,45 @@ mod tests {
             .await
             .expect("insert token uri");
 
-        {
-            let conn = storage.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE facet_values SET token_count = '0' WHERE id IN (
-                    SELECT facet_value_id FROM facet_token_map WHERE token = ?1 AND token_id = ?2
-                )",
-                params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
-            )
-            .expect("zero facet counts");
-            conn.execute(
-                "DELETE FROM facet_token_map WHERE token = ?1 AND token_id = ?2",
-                params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
-            )
+        storage
+            .with_sqlite_conn(|conn| {
+                conn.execute(
+                    "UPDATE facet_values SET token_count = '0' WHERE id IN (
+                        SELECT facet_value_id FROM facet_token_map WHERE token = ?1 AND token_id = ?2
+                    )",
+                    params![result.contract.to_be_bytes_vec(), result.token_id.to_big_endian().to_vec()],
+                )?;
+                conn.execute(
+                    "DELETE FROM facet_token_map WHERE token = ?1 AND token_id = ?2",
+                    params![result.contract.to_be_bytes_vec(), result.token_id.to_big_endian().to_vec()],
+                )?;
+                Ok(())
+            })
             .expect("delete facet mappings");
-        }
 
         storage
             .store_token_uri(&result)
             .await
             .expect("repair missing facets");
 
-        let (facet_map_count, positive_counts): (i64, i64) = {
-            let conn = storage.conn.lock().unwrap();
-            let facet_map_count: i64 = conn
-                .query_row(
+        let (facet_map_count, positive_counts): (i64, i64) = storage
+            .with_sqlite_conn(|conn| {
+                let facet_map_count: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM facet_token_map WHERE token = ?1 AND token_id = ?2",
-                    params![felt_to_blob(result.contract), u256_to_blob(result.token_id)],
+                    params![
+                        result.contract.to_be_bytes_vec(),
+                        result.token_id.to_big_endian().to_vec()
+                    ],
                     |row| row.get(0),
-                )
-                .expect("count facet mappings");
-            let positive_counts: i64 = conn
-                .query_row(
+                )?;
+                let positive_counts: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM facet_values WHERE CAST(token_count AS INTEGER) > 0",
                     [],
                     |row| row.get(0),
-                )
-                .expect("count positive facet values");
-            (facet_map_count, positive_counts)
-        };
+                )?;
+                Ok((facet_map_count, positive_counts))
+            })
+            .expect("read facet assertions");
 
         assert_eq!(facet_map_count, 2);
         assert_eq!(positive_counts, 2);
@@ -3276,8 +3378,8 @@ mod tests {
         for (token_id, metadata_json) in fixtures {
             storage
                 .store_token_uri(&TokenUriResult {
-                    contract,
-                    token_id: U256::from(token_id),
+                    contract: contract.into(),
+                    token_id: primitive_types::U256::from(token_id),
                     uri: Some(format!("ipfs://beasts/{token_id}")),
                     metadata_json: Some(metadata_json.to_owned()),
                 })

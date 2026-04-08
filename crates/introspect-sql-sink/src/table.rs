@@ -2,7 +2,7 @@ use crate::error::{CollectColumnResults, ColumnNotFoundError, ColumnsNotFoundErr
 use introspect_types::{ColumnDef, ColumnInfo, MemberDef, PrimaryDef, TypeDef};
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use std::rc::Rc;
 use torii_introspect::tables::RecordSchema;

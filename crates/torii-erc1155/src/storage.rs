@@ -7,14 +7,14 @@
 //! - Records all adjustments in an audit table for debugging
 
 use anyhow::Result;
+use primitive_types::U256;
 use rusqlite::{params, params_from_iter, Connection, ToSql};
-use starknet::core::types::{Felt, U256};
+use starknet_types_raw::Felt;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use tokio_postgres::{types::ToSql as PgToSql, Client, NoTls};
-use torii_common::{
-    blob_to_felt, blob_to_u256, felt_to_blob, u256_to_blob, TokenUriResult, TokenUriStore,
-};
+use torii_common::{blob_to_u256, u256_to_blob, TokenUriResult, TokenUriStore};
+use torii_sql::DbPool;
 
 use crate::balance_fetcher::Erc1155BalanceFetchRequest;
 
@@ -23,7 +23,15 @@ const SQLITE_TOKEN_BATCH_SIZE: usize = SQLITE_MAX_BIND_VARS;
 const SQLITE_TOKEN_PAIR_BATCH_SIZE: usize = SQLITE_MAX_BIND_VARS / 2;
 
 /// Maximum value for U256 (2^256 - 1)
-const U256_MAX: U256 = U256::from_words(u128::MAX, u128::MAX);
+const U256_MAX: U256 = U256([u64::MAX, u64::MAX, u64::MAX, u64::MAX]);
+
+fn felt_to_blob(value: Felt) -> Vec<u8> {
+    value.to_be_bytes_vec()
+}
+
+fn blob_to_felt(bytes: &[u8]) -> Felt {
+    Felt::from_be_bytes_slice(bytes).unwrap_or(Felt::ZERO)
+}
 
 /// Safely adds two U256 values, capping at U256::MAX on overflow.
 ///
@@ -54,6 +62,7 @@ fn safe_u256_add(a: U256, b: U256) -> U256 {
 
 /// Storage for ERC1155 token data
 pub struct Erc1155Storage {
+    pool: DbPool,
     backend: StorageBackend,
     conn: Arc<Mutex<Connection>>,
     pg_conn: Option<Arc<tokio::sync::Mutex<Client>>>,
@@ -157,10 +166,14 @@ pub struct Erc1155BalanceAdjustment {
 }
 
 impl Erc1155Storage {
+    pub fn pool(&self) -> &DbPool {
+        &self.pool
+    }
+
     /// Create or open the database
-    pub async fn new(db_path: &str) -> Result<Self> {
-        if db_path.starts_with("postgres://") || db_path.starts_with("postgresql://") {
-            let (client, connection) = tokio_postgres::connect(db_path, NoTls).await?;
+    pub async fn new(pool: DbPool, database_url: &str) -> Result<Self> {
+        if matches!(&pool, DbPool::Postgres(_)) {
+            let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
                     tracing::error!(target: "torii_erc1155::storage", error = %e, "PostgreSQL connection task failed");
@@ -305,13 +318,14 @@ impl Erc1155Storage {
 
             tracing::info!(target: "torii_erc1155::storage", "PostgreSQL storage initialized");
             return Ok(Self {
+                pool,
                 backend: StorageBackend::Postgres,
                 conn: Arc::new(Mutex::new(Connection::open_in_memory()?)),
                 pg_conn: Some(Arc::new(tokio::sync::Mutex::new(client))),
             });
         }
 
-        let conn = Connection::open(db_path)?;
+        let conn = Connection::open(database_url)?;
 
         // Enable WAL mode + Performance PRAGMAs
         conn.execute_batch(
@@ -554,9 +568,10 @@ impl Erc1155Storage {
             [],
         )?;
 
-        tracing::info!(target: "torii_erc1155::storage", db_path = %db_path, "ERC1155 database initialized");
+        tracing::info!(target: "torii_erc1155::storage", db_path = %database_url, "ERC1155 database initialized");
 
         Ok(Self {
+            pool,
             backend: StorageBackend::Sqlite,
             conn: Arc::new(Mutex::new(conn)),
             pg_conn: None,

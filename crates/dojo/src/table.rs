@@ -4,7 +4,7 @@ use dojo_introspect::selector::compute_selector_from_namespace_and_name;
 use dojo_introspect::{DojoSchema, DojoSerde};
 use introspect_types::transcode::Transcode;
 use introspect_types::{Attribute, Attributes, CairoSerde, ColumnDef, ColumnInfo, PrimaryDef};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use torii_introspect::schema::TableSchema;
 
@@ -171,14 +171,14 @@ impl DojoTable {
     pub fn get_columns(&self, selectors: &[Felt]) -> DojoToriiResult<Vec<&ColumnInfo>> {
         selectors
             .iter()
-            .map(|&selector| self.get_column(selector))
+            .map(|selector| self.get_column(selector))
             .collect()
     }
 
-    pub fn get_column(&self, selector: Felt) -> DojoToriiResult<&ColumnInfo> {
+    pub fn get_column(&self, selector: &Felt) -> DojoToriiResult<&ColumnInfo> {
         self.columns
-            .get(&selector)
-            .ok_or_else(|| DojoToriiError::ColumnNotFound(self.name.clone(), selector))
+            .get(selector)
+            .ok_or_else(|| DojoToriiError::ColumnNotFound(self.name.clone(), *selector))
     }
 
     pub fn selectors(&self) -> impl Iterator<Item = &Felt> + '_ {
@@ -198,7 +198,7 @@ impl DojoTable {
             primary: self.primary.clone(),
             columns: self
                 .selectors()
-                .map(|&selector| (selector, self.get_column(selector).cloned().unwrap()).into())
+                .map(|selector| (*selector, self.get_column(selector).cloned().unwrap()).into())
                 .collect(),
         }
     }
@@ -244,7 +244,7 @@ impl DojoTable {
 
     pub fn parse_field(&self, selector: Felt, data: Vec<Felt>) -> DojoToriiResult<Vec<u8>> {
         let mut data: DojoSerde<_> = DojoSerde::new_from_source(data, self.legacy);
-        let column = self.get_column(selector)?;
+        let column = self.get_column(&selector)?;
         column
             .transcode_complete(&mut data)
             .map_err(DojoToriiError::TranscodeError)

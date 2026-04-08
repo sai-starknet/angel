@@ -8,7 +8,7 @@ use sqlx::postgres::{PgArguments, PgRow};
 use sqlx::query::Query;
 use sqlx::types::Json;
 use sqlx::{FromRow, PgPool, Postgres};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::HashMap;
 use torii_sql::SqlxResult;
 

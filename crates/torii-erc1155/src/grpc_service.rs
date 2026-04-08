@@ -13,16 +13,20 @@ use crate::proto::{
 use crate::storage::{Erc1155Storage, TokenTransferData, TransferCursor};
 use async_trait::async_trait;
 use futures::stream::Stream;
-use starknet::core::types::Felt;
-use starknet::core::types::U256;
+use primitive_types::U256;
+use starknet_types_raw::Felt;
 use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
-use torii_common::{bytes_to_felt, bytes_to_u256, u256_to_bytes};
+use torii_common::{bytes_to_u256, u256_to_bytes};
 
 const DEFAULT_PROJECT_ID: &str = "arcade-main";
+
+fn bytes_to_felt(bytes: &[u8]) -> Option<Felt> {
+    Felt::from_be_bytes_slice(bytes).ok()
+}
 
 /// gRPC service implementation for ERC1155
 #[derive(Clone)]
@@ -55,14 +59,14 @@ impl Erc1155Service {
     /// Convert storage TokenTransferData to proto TokenTransfer
     fn transfer_data_to_proto(data: &TokenTransferData) -> TokenTransfer {
         TokenTransfer {
-            token: data.token.to_bytes_be().to_vec(),
-            operator: data.operator.to_bytes_be().to_vec(),
-            from: data.from.to_bytes_be().to_vec(),
-            to: data.to.to_bytes_be().to_vec(),
+            token: data.token.to_be_bytes_vec(),
+            operator: data.operator.to_be_bytes_vec(),
+            from: data.from.to_be_bytes_vec(),
+            to: data.to.to_be_bytes_vec(),
             token_id: u256_to_bytes(data.token_id),
             amount: u256_to_bytes(data.amount),
             block_number: data.block_number,
-            tx_hash: data.tx_hash.to_bytes_be().to_vec(),
+            tx_hash: data.tx_hash.to_be_bytes_vec(),
             timestamp: data.timestamp.unwrap_or(0),
             is_batch: data.is_batch,
             batch_index: data.batch_index,
@@ -223,7 +227,7 @@ impl Erc1155Service {
                 };
 
                 CollectionToken {
-                    contract_address: contract.to_bytes_be().to_vec(),
+                    contract_address: contract.to_be_bytes_vec(),
                     token_id: token_id_bytes,
                     uri,
                     metadata_json,
@@ -361,7 +365,7 @@ impl Erc1155Trait for Erc1155Service {
 
             let entries = match self.storage.get_token_metadata(token).await {
                 Ok(Some((name, symbol, total_supply))) => vec![TokenMetadataEntry {
-                    token: token.to_bytes_be().to_vec(),
+                    token: token.to_be_bytes_vec(),
                     name,
                     symbol,
                     total_supply: total_supply.map(u256_to_bytes),
@@ -392,7 +396,7 @@ impl Erc1155Trait for Erc1155Service {
         let entries = all
             .into_iter()
             .map(|(token, name, symbol, total_supply)| TokenMetadataEntry {
-                token: token.to_bytes_be().to_vec(),
+                token: token.to_be_bytes_vec(),
                 name,
                 symbol,
                 total_supply: total_supply.map(u256_to_bytes),
@@ -401,7 +405,7 @@ impl Erc1155Trait for Erc1155Service {
 
         Ok(Response::new(GetTokenMetadataResponse {
             tokens: entries,
-            next_cursor: next_cursor.map(|c| c.to_bytes_be().to_vec()),
+            next_cursor: next_cursor.map(|c| c.to_be_bytes_vec()),
         }))
     }
 
@@ -586,7 +590,7 @@ impl Erc1155Trait for Erc1155Service {
             let traits = Self::build_trait_summaries(&facets);
 
             overviews.push(ContractCollectionOverview {
-                contract_address: contract.to_bytes_be().to_vec(),
+                contract_address: contract.to_be_bytes_vec(),
                 tokens,
                 next_cursor_token_id,
                 total_hits,

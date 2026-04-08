@@ -1,12 +1,13 @@
 use itertools::Itertools;
 use starknet::core::types::Felt;
+use torii::etl::decoder::Decoder;
 use torii_dojo::decoder::DojoDecoder;
 use torii_dojo::store::DojoStoreTrait;
-use torii_dojo::DojoToriiError;
 use torii_introspect::events::{IntrospectBody, IntrospectMsg};
 use torii_introspect_sql_sink::IntrospectDb;
 use torii_sql::{DbPool, PoolConfig};
 use torii_test_utils::{resolve_path_like, FakeProvider, MultiContractEventIterator};
+use torii_types::event::StarknetEvent;
 
 // const DB_URL: &str = "postgres://torii:torii@localhost:5432/torii";
 const DB_URL: &str = "sqlite://sqlite-data.db?mode=rwc";
@@ -24,6 +25,24 @@ const BLOB_ARENA_ADDRESS: Felt =
 // ];
 
 const ADDRESSES: [Felt; 2] = [PISTOLS_ADDRESS, BLOB_ARENA_ADDRESS];
+
+fn clone_introspect_msg(msg: &IntrospectMsg) -> IntrospectMsg {
+    match msg {
+        IntrospectMsg::CreateTable(value) => IntrospectMsg::CreateTable(value.clone()),
+        IntrospectMsg::UpdateTable(value) => IntrospectMsg::UpdateTable(value.clone()),
+        IntrospectMsg::RenameTable(value) => IntrospectMsg::RenameTable(value.clone()),
+        IntrospectMsg::RenamePrimary(value) => IntrospectMsg::RenamePrimary(value.clone()),
+        IntrospectMsg::RetypePrimary(value) => IntrospectMsg::RetypePrimary(value.clone()),
+        IntrospectMsg::RenameColumns(value) => IntrospectMsg::RenameColumns(value.clone()),
+        IntrospectMsg::RetypeColumns(value) => IntrospectMsg::RetypeColumns(value.clone()),
+        IntrospectMsg::AddColumns(value) => IntrospectMsg::AddColumns(value.clone()),
+        IntrospectMsg::DropTable(value) => IntrospectMsg::DropTable(value.clone()),
+        IntrospectMsg::DropColumns(value) => IntrospectMsg::DropColumns(value.clone()),
+        IntrospectMsg::InsertsFields(value) => IntrospectMsg::InsertsFields(value.clone()),
+        IntrospectMsg::DeleteRecords(value) => IntrospectMsg::DeleteRecords(value.clone()),
+        IntrospectMsg::DeletesFields(value) => IntrospectMsg::DeletesFields(value.clone()),
+    }
+}
 
 async fn run_events(
     events: &mut MultiContractEventIterator,
@@ -56,19 +75,31 @@ async fn run_events(
             };
             *event_n += 1;
             this_run += 1;
-            match decoder.decode_raw_event(&event).await {
-                Ok(IntrospectBody {
-                    context: metadata,
-                    msg: IntrospectMsg::CreateTable(mut msg),
-                }) => {
-                    msg.append_only = true;
-                    msgs.push((IntrospectMsg::CreateTable(msg), metadata).into());
-                }
-                Ok(msg) => {
-                    msgs.push(msg);
-                }
-                Err(DojoToriiError::UnknownDojoEventSelector(_)) => {
-                    println!("Unknown event selector, skipping event");
+            let event = StarknetEvent {
+                from_address: event.from_address,
+                keys: event.keys,
+                data: event.data,
+                block_number: event.block_number.unwrap_or_default(),
+                transaction_hash: event.transaction_hash,
+            };
+            match decoder.decode_event(&event).await {
+                Ok(envelopes) => {
+                    for envelope in envelopes {
+                        let Some(body) = envelope.downcast_ref::<IntrospectBody>() else {
+                            continue;
+                        };
+                        let metadata = body.context;
+                        match &body.msg {
+                            IntrospectMsg::CreateTable(msg) => {
+                                let mut msg = msg.clone();
+                                msg.append_only = true;
+                                msgs.push((IntrospectMsg::CreateTable(msg), metadata).into());
+                            }
+                            other => {
+                                msgs.push((clone_introspect_msg(other), metadata).into());
+                            }
+                        }
+                    }
                 }
                 Err(err) => {
                     println!("Failed to decode event: {err:?}");

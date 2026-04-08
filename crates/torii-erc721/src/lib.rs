@@ -7,8 +7,8 @@
 //! # Components
 //!
 //! - [`Erc721Decoder`]: Decodes ERC721 Transfer, Approval, and ApprovalForAll events
-//! - [`Erc721Sink`]: Processes decoded events, stores in SQLite, and publishes updates
-//! - [`Erc721Storage`]: SQLite storage with ownership tracking and efficient pagination
+//! - [`Erc721Sink`]: Processes decoded events, stores them, and publishes updates
+//! - [`Erc721Storage`]: DbPool-backed storage with ownership tracking and efficient pagination
 //! - [`Erc721Service`]: gRPC service for queries and real-time subscriptions
 //!
 //! # Example
@@ -35,6 +35,7 @@
 //!     .add_service(Erc721Server::new(grpc_service));
 //! ```
 
+mod conversions;
 pub mod decoder;
 pub mod grpc_service;
 pub mod handlers;
@@ -53,7 +54,8 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/erc721_descript
 
 // Re-export main types for convenience
 pub use decoder::{
-    BatchMetadataUpdate, Erc721Decoder, MetadataUpdate, NftApproval, NftTransfer, OperatorApproval,
+    BatchMetadataUpdate, Erc721Body, Erc721Decoder, Erc721Msg, MetadataUpdate, NftApproval,
+    NftTransfer, OperatorApproval, ERC721_TYPE,
 };
 pub use grpc_service::Erc721Service;
 pub use handlers::{Erc721MetadataCommandHandler, Erc721TokenUriCommandHandler};

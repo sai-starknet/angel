@@ -8,6 +8,7 @@ torii = { path = "../.." }
 torii-common = { path = "../torii-common" }
 torii-introspect = { path = "../introspect" }
 torii-erc721 = { path = "../torii-erc721" }
+torii-sql = { path = "../sql", features = ["postgres", "sqlite"] }
 torii-runtime-common.workspace = true
 
 anyhow.workspace = true

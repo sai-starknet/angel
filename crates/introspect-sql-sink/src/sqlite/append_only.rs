@@ -8,7 +8,7 @@ use introspect_types::ColumnInfo;
 use itertools::Itertools;
 use sqlx::Arguments;
 use sqlx::Error::Encode as EncodeError;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::fmt::Write as FmtWrite;
 use std::sync::Arc;
 use torii_introspect::Record;

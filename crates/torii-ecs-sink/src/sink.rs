@@ -3,11 +3,7 @@ use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use dojo_introspect::events::{
-    EventEmitted, StoreDelRecord, StoreSetRecord, StoreUpdateMember, StoreUpdateRecord,
-};
-use introspect_types::event::CairoEventInfo;
-use starknet::core::types::Felt;
+use starknet_types_raw::Felt;
 use torii::axum::Router;
 use torii::command::CommandBusSender;
 use torii::etl::decoder::DecoderId;
@@ -71,7 +67,7 @@ impl EcsSink {
             .contract_types
             .read()
             .await
-            .get(&contract_address)
+            .get(&contract_address.into())
             .copied()
             .unwrap_or(RegisteredContractType::World);
 
@@ -138,7 +134,7 @@ impl EcsSink {
         };
 
         if let Err(error) = command_bus.dispatch(RegisterExternalContractCommand {
-            world_address: body.context.from_address,
+            world_address: body.context.from_address.into(),
             contract_address: body.msg.contract_address,
             contract_name: body.msg.contract_name.clone(),
             namespace: body.msg.namespace.clone(),
@@ -174,15 +170,20 @@ impl Sink for EcsSink {
 
     async fn process(&self, envelopes: &[Envelope], batch: &ExtractionBatch) -> Result<()> {
         for (ordinal, event) in batch.events.iter().enumerate() {
-            let context = batch
-                .get_event_context(&event.transaction_hash, event.from_address)
-                .unwrap_or_default();
+            let block_number = batch
+                .transactions
+                .get(&event.transaction_hash)
+                .map_or(event.block_number, |tx| tx.block_number);
+            let timestamp = batch
+                .blocks
+                .get(&block_number)
+                .map_or(0, |block| block.timestamp);
             self.service
                 .store_event(
                     event.from_address,
                     event.transaction_hash,
-                    context.transaction.block_number,
-                    context.block.timestamp,
+                    block_number,
+                    timestamp,
                     &event.keys,
                     &event.data,
                     ordinal,
@@ -193,8 +194,8 @@ impl Sink for EcsSink {
                 .record_contract_progress(
                     event.from_address,
                     self.contract_type_for(event.from_address).await,
-                    context.transaction.block_number,
-                    context.block.timestamp,
+                    block_number,
+                    timestamp,
                     None,
                 )
                 .await?;
@@ -202,13 +203,13 @@ impl Sink for EcsSink {
             let Some(selector) = event.keys.first() else {
                 continue;
             };
-            let selector_raw = selector.to_raw();
+            let selector_raw = *selector;
             if matches!(
                 selector_raw,
-                StoreSetRecord::SELECTOR_RAW
-                    | StoreUpdateRecord::SELECTOR_RAW
-                    | StoreUpdateMember::SELECTOR_RAW
-                    | StoreDelRecord::SELECTOR_RAW
+                s if s == Felt::selector("StoreSetRecord")
+                    || s == Felt::selector("StoreUpdateRecord")
+                    || s == Felt::selector("StoreUpdateMember")
+                    || s == Felt::selector("StoreDelRecord")
             ) {
                 if event.keys.len() >= 3 {
                     self.service
@@ -220,12 +221,12 @@ impl Sink for EcsSink {
                             event.from_address,
                             event.keys[1],
                             event.keys[2],
-                            context.block.timestamp,
-                            selector_raw == StoreDelRecord::SELECTOR_RAW,
+                            timestamp,
+                            selector_raw == Felt::selector("StoreDelRecord"),
                         )
                         .await?;
                 }
-            } else if selector_raw == EventEmitted::SELECTOR_RAW && event.keys.len() >= 2 {
+            } else if selector_raw == Felt::selector("EventEmitted") && event.keys.len() >= 2 {
                 self.service
                     .record_table_kind(event.from_address, event.keys[1], TableKind::EventMessage)
                     .await?;
@@ -247,9 +248,11 @@ impl Sink for EcsSink {
             let Some(body) = envelope.downcast_ref::<IntrospectBody>() else {
                 continue;
             };
-            let context = batch
-                .get_event_context(&body.context.transaction_hash, body.context.from_address)
-                .unwrap_or_default();
+            let timestamp = batch
+                .transactions
+                .get(&body.context.transaction_hash)
+                .and_then(|tx| batch.blocks.get(&tx.block_number))
+                .map_or(0, |block| block.timestamp);
 
             match &body.msg {
                 IntrospectMsg::CreateTable(table) => {
@@ -257,7 +260,11 @@ impl Sink for EcsSink {
                         .cache_created_table(body.context.from_address, table)
                         .await;
                     self.service
-                        .record_table_kind(body.context.from_address, table.id, TableKind::Entity)
+                        .record_table_kind(
+                            body.context.from_address,
+                            table.id.into(),
+                            TableKind::Entity,
+                        )
                         .await
                         .ok();
                 }
@@ -266,15 +273,19 @@ impl Sink for EcsSink {
                         .cache_updated_table(body.context.from_address, table)
                         .await;
                     self.service
-                        .record_table_kind(body.context.from_address, table.id, TableKind::Entity)
+                        .record_table_kind(
+                            body.context.from_address,
+                            table.id.into(),
+                            TableKind::Entity,
+                        )
                         .await
                         .ok();
                 }
                 IntrospectMsg::InsertsFields(insert) => {
                     let kind = if batch.events.iter().any(|event| {
                         event.keys.first().is_some_and(|selector| {
-                            selector.to_raw() == EventEmitted::SELECTOR_RAW
-                                && event.keys.get(1).copied() == Some(insert.table)
+                            *selector == Felt::selector("EventEmitted")
+                                && event.keys.get(1).copied() == Some(insert.table.into())
                         })
                     }) {
                         TableKind::EventMessage
@@ -282,17 +293,19 @@ impl Sink for EcsSink {
                         TableKind::Entity
                     };
                     self.service
-                        .record_table_kind(body.context.from_address, insert.table, kind)
+                        .record_table_kind(body.context.from_address, insert.table.into(), kind)
                         .await?;
+                    let raw_columns: Vec<Felt> =
+                        insert.columns.iter().copied().map(Into::into).collect();
                     for record in &insert.records {
-                        let entity_id = Felt::from_bytes_be(&record.id);
+                        let entity_id = Felt::from_be_bytes_slice(&record.id)?;
                         self.service
                             .upsert_entity_meta(
                                 kind,
                                 body.context.from_address,
-                                insert.table,
+                                insert.table.into(),
                                 entity_id,
-                                context.block.timestamp,
+                                timestamp,
                                 false,
                             )
                             .await?;
@@ -300,10 +313,10 @@ impl Sink for EcsSink {
                             .upsert_entity_model(
                                 kind,
                                 body.context.from_address,
-                                insert.table,
-                                &insert.columns,
+                                insert.table.into(),
+                                &raw_columns,
                                 record,
-                                context.block.timestamp,
+                                timestamp,
                             )
                             .await?;
                         self.service
@@ -312,16 +325,16 @@ impl Sink for EcsSink {
                     }
                 }
                 IntrospectMsg::DeleteRecords(delete) => {
-                    let kind = self.service.table_kind(delete.table).await?;
+                    let kind = self.service.table_kind(delete.table.into()).await?;
                     for row in &delete.rows {
                         let entity_id = row.to_felt();
                         self.service
                             .upsert_entity_meta(
                                 kind,
                                 body.context.from_address,
-                                delete.table,
-                                entity_id,
-                                context.block.timestamp,
+                                delete.table.into(),
+                                entity_id.into(),
+                                timestamp,
                                 true,
                             )
                             .await?;
@@ -329,12 +342,16 @@ impl Sink for EcsSink {
                             .delete_entity_model(
                                 kind,
                                 body.context.from_address,
-                                delete.table,
-                                entity_id,
+                                delete.table.into(),
+                                entity_id.into(),
                             )
                             .await?;
                         self.service
-                            .publish_entity_update(kind, body.context.from_address, entity_id)
+                            .publish_entity_update(
+                                kind,
+                                body.context.from_address,
+                                entity_id.into(),
+                            )
                             .await?;
                     }
                 }

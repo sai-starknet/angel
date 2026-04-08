@@ -46,7 +46,7 @@ impl PathfinderExtractor {
             self.finished = true;
         }
         self.current = last_block + 1;
-        Ok((blocks, events.into_iter().map(Into::into).collect()))
+        Ok((blocks, events))
     }
 }
 

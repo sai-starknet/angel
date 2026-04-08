@@ -173,8 +173,14 @@ impl Config {
         Self::parse_addresses("ERC1155", &self.erc1155)
     }
 
-    pub fn historical_models(&self) -> &[String] {
-        &self.historical
+    pub fn historical_models(&self) -> Vec<String> {
+        let mut models = Vec::with_capacity(self.historical.len());
+        for model in &self.historical {
+            if !model.is_empty() && !models.contains(model) {
+                models.push(model.clone());
+            }
+        }
+        models
     }
 
     pub fn storage_backend(&self) -> DbBackend {

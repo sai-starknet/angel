@@ -268,7 +268,15 @@ impl ArcadeSink {
                         Self::tracked_table_for_id(&plan.tracked_tables, insert.table)
                     {
                         for record in &insert.records {
-                            let entity_id = Felt::from_bytes_be_slice(&record.id);
+                            let entity_id = Felt::from_bytes_be(&record.id);
+                            if entity_id == Felt::ZERO && record.id.iter().any(|byte| *byte != 0) {
+                                tracing::warn!(
+                                    target: "torii_arcade_sink::sink",
+                                    tracked_table = ?tracked_table,
+                                    "Skipping malformed entity id in introspect insert record"
+                                );
+                                continue;
+                            }
                             plan.projection_ops
                                 .push(ProjectionOp::Refresh(tracked_table, entity_id));
                         }
@@ -374,7 +382,7 @@ mod tests {
     use starknet::core::types::Felt;
     use tempfile::tempdir;
     use torii::etl::extractor::ExtractionBatch;
-    use torii::etl::{Envelope, MetaData};
+    use torii::etl::{Envelope, EventContext};
     use torii_introspect::events::{
         InsertsFields, IntrospectBody, IntrospectMsg, Record, RenamePrimary,
     };
@@ -387,10 +395,10 @@ mod tests {
 
     fn introspect_envelope(msg: IntrospectMsg) -> Envelope {
         Envelope::from(IntrospectBody {
-            context: MetaData {
-                block_number: Some(1),
-                transaction_hash: Felt::ZERO,
-                from_address: Felt::ZERO,
+            context: EventContext {
+                block_number: 1,
+                transaction_hash: Felt::ZERO.into(),
+                from_address: Felt::ZERO.into(),
             },
             msg,
         })

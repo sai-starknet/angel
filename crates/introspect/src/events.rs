@@ -6,7 +6,7 @@ use introspect_types::{
     Attribute, ColumnDef, FeltId, FeltIds, PrimaryDef, PrimaryTypeDef, PrimaryValue, TypeDef,
 };
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use torii::etl::envelope::EventMsg;
 use torii::etl::{EventBody, TypeId};
 
@@ -384,7 +384,7 @@ impl Record {
 
 impl FeltId for Record {
     fn id(&self) -> Felt {
-        self.id.into()
+        Felt::from_bytes_be(&self.id)
     }
 }
 
@@ -394,7 +394,7 @@ trait ToKeyBytes {
 
 impl ToKeyBytes for Felt {
     fn to_key_bytes(&self) -> [u8; 32] {
-        self.to_be_bytes()
+        self.to_bytes_be()
     }
 }
 

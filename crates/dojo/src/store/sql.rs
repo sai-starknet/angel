@@ -1,7 +1,7 @@
 use crate::store::DojoStoreTrait;
 use crate::{DojoTable, DojoToriiResult};
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use torii_sql::DbPool;
 
 #[async_trait]

@@ -1,9 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet_types_raw::event::EmittedEvent;
+use starknet_types_raw::Felt;
 use std::any::Any;
 use torii::etl::envelope::{Envelope, TypeId, TypedBody};
-use torii::etl::Decoder;
+use torii::etl::{Decoder, EventContext};
 
 /// Decoded log entry
 #[derive(Debug, Clone)]
@@ -50,11 +50,9 @@ impl Decoder for LogDecoder {
 
     async fn decode(
         &self,
-        from_address: Felt,
         keys: &[Felt],
         data: &[Felt],
-        block_number: u64,
-        transaction_hash: Felt,
+        context: EventContext,
     ) -> Result<Vec<Envelope>> {
         // Apply key filter if specified
         if let Some(ref filter) = self.key_filter {
@@ -83,15 +81,15 @@ impl Decoder for LogDecoder {
 
         let log_entry = LogEntry {
             message,
-            block_number,
+            block_number: context.block_number,
             event_key,
         };
 
         // Create envelope with unique ID
         let envelope_id = format!(
             "log_{}_{}",
-            block_number,
-            format!("{:#x}", transaction_hash)
+            context.block_number,
+            format!("{:#x}", context.transaction_hash)
         );
         let envelope = Envelope::new(
             envelope_id,

@@ -18,11 +18,11 @@ use prost::Message;
 use prost_types::Any as ProtoAny;
 use sqlx::any::AnyPoolOptions;
 use sqlx::{Any as SqlxAny, QueryBuilder};
-use starknet_types_raw::event::EmittedEvent;
 use std::sync::Arc;
 use torii::etl::envelope::{Envelope, TypeId};
 use torii::etl::extractor::ExtractionBatch;
 use torii::etl::sink::{EventBus, Sink, TopicInfo};
+use torii::etl::StarknetEvent;
 use torii::grpc::UpdateType;
 
 pub use decoder::{SqlDecoder, SqlInsert, SqlUpdate};
@@ -51,7 +51,7 @@ pub struct SqlSink {
 
 impl SqlSink {
     /// Generates sample events for testing the SQL sink.
-    pub fn generate_sample_events() -> Vec<EmittedEvent> {
+    pub fn generate_sample_events() -> Vec<StarknetEvent> {
         samples::generate_sample_events()
     }
 

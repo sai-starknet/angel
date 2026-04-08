@@ -92,9 +92,9 @@ async fn load_persisted_contract_registries(
     let mut contract_types = contract_type_registry.write().await;
 
     for (contract, decoder_ids, _) in mappings {
-        decoders.insert(contract, decoder_ids.clone());
+        decoders.insert(contract.into(), decoder_ids.clone());
         if let Some(contract_type) = contract_type_from_decoder_ids(&decoder_ids) {
-            contract_types.insert(contract, contract_type);
+            contract_types.insert(contract.into(), contract_type);
         }
     }
 
@@ -463,7 +463,14 @@ async fn run_indexer(config: Config) -> Result<()> {
 
     if config.index_external_contracts {
         torii_config = torii_config
-            .with_registry_cache(decoder_registry.clone())
+            .with_registry_cache(Arc::new(RwLock::new(
+                decoder_registry
+                    .read()
+                    .await
+                    .iter()
+                    .map(|(contract, decoder_ids)| ((*contract).into(), decoder_ids.clone()))
+                    .collect(),
+            )))
             .with_command_handler(Box::new(RegisterExternalContractCommandHandler::new(
                 registry_engine_db.clone(),
                 decoder_registry.clone(),
@@ -472,12 +479,18 @@ async fn run_indexer(config: Config) -> Result<()> {
     }
 
     if !excluded_dojo_contracts.is_empty() {
-        torii_config = torii_config.blacklist_contracts(excluded_dojo_contracts.clone());
+        torii_config = torii_config.blacklist_contracts(
+            excluded_dojo_contracts
+                .iter()
+                .copied()
+                .map(Into::into)
+                .collect(),
+        );
     }
 
     let dojo_decoder_id = DecoderId::new("dojo-introspect");
     for contract in &introspect_contracts {
-        torii_config = torii_config.map_contract(*contract, vec![dojo_decoder_id]);
+        torii_config = torii_config.map_contract((*contract).into(), vec![dojo_decoder_id]);
     }
 
     for contract in &excluded_dojo_contracts {
@@ -518,7 +531,7 @@ async fn run_indexer(config: Config) -> Result<()> {
             reflection_builder.register_encoded_file_descriptor_set(ERC20_DESCRIPTOR_SET);
         let decoder_id = DecoderId::new("erc20");
         for address in &erc20_addresses {
-            torii_config = torii_config.map_contract(*address, vec![decoder_id]);
+            torii_config = torii_config.map_contract((*address).into(), vec![decoder_id]);
         }
         erc20_grpc_service = Some(grpc_service);
     }
@@ -553,13 +566,14 @@ async fn run_indexer(config: Config) -> Result<()> {
             reflection_builder.register_encoded_file_descriptor_set(ERC721_DESCRIPTOR_SET);
         let decoder_id = DecoderId::new("erc721");
         for address in &erc721_addresses {
-            torii_config = torii_config.map_contract(*address, vec![decoder_id]);
+            torii_config = torii_config.map_contract((*address).into(), vec![decoder_id]);
         }
         erc721_grpc_service = Some(grpc_service);
     }
 
     if install_erc1155 {
-        let storage = Arc::new(Erc1155Storage::new(&erc1155_db_url).await?);
+        let erc1155_pool = DbPoolOptions::new().connect_any(&erc1155_db_url).await?;
+        let storage = Arc::new(Erc1155Storage::new(erc1155_pool, &erc1155_db_url).await?);
         let grpc_service = Erc1155Service::new(storage.clone());
         let mut sink = Erc1155Sink::new(storage.clone())
             .with_grpc_service(grpc_service.clone())
@@ -589,7 +603,7 @@ async fn run_indexer(config: Config) -> Result<()> {
             reflection_builder.register_encoded_file_descriptor_set(ERC1155_DESCRIPTOR_SET);
         let decoder_id = DecoderId::new("erc1155");
         for address in &erc1155_addresses {
-            torii_config = torii_config.map_contract(*address, vec![decoder_id]);
+            torii_config = torii_config.map_contract((*address).into(), vec![decoder_id]);
         }
         erc1155_grpc_service = Some(grpc_service);
     }
@@ -766,7 +780,7 @@ fn append_unique_contract_configs(
     for &address in addresses {
         if seen.insert(address) {
             configs.push(ContractEventConfig {
-                address,
+                address: address.into(),
                 from_block,
                 to_block,
             });

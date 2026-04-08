@@ -164,14 +164,14 @@ async fn main() -> Result<()> {
     let erc20_decoder_id = DecoderId::new("erc20");
     for (address, name) in config.well_known_contracts() {
         tracing::info!("Mapping {} at {:#x} to ERC20 decoder", name, address);
-        torii_config = torii_config.map_contract(address, vec![erc20_decoder_id]);
+        torii_config = torii_config.map_contract(address.into(), vec![erc20_decoder_id]);
     }
 
     // Add custom contracts with explicit mappings
     for contract_str in &config.contracts {
         let address = Felt::from_hex(contract_str)?;
         tracing::info!("Mapping custom contract {:#x} to ERC20 decoder", address);
-        torii_config = torii_config.map_contract(address, vec![erc20_decoder_id]);
+        torii_config = torii_config.map_contract(address.into(), vec![erc20_decoder_id]);
     }
 
     // Log mode: no_auto_discovery affects whether unmapped contracts are tried

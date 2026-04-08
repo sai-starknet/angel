@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use introspect_types::{
-    CairoDeserialize, CairoDeserializer, CairoEvent, CairoEventInfo, CairoSerde, DecodeResult,
-    FeltSource,
+    cairo_event_name_and_selector, CairoDeserialize, CairoDeserializer, CairoEvent, CairoSerde,
+    DecodeResult, FeltSource,
 };
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -64,9 +64,10 @@ impl<D: FeltSource> CairoEvent<CairoSerde<D>> for ExternalContractRegisteredEven
     }
 }
 
-impl CairoEventInfo for ExternalContractRegisteredEvent {
-    const NAME: &'static str = "ExternalContractRegistered";
-}
+cairo_event_name_and_selector!(
+    ExternalContractRegisteredEvent,
+    "ExternalContractRegistered"
+);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalContractRegistered {
@@ -209,7 +210,7 @@ impl CommandHandler for RegisterExternalContractCommandHandler {
         let command = *command;
 
         self.engine_db
-            .set_contract_decoders(command.contract_address, &command.decoder_ids)
+            .set_contract_decoders(command.contract_address.into(), &command.decoder_ids)
             .await
             .with_context(|| {
                 format!(
@@ -378,7 +379,7 @@ mod tests {
         );
         assert_eq!(
             engine_db
-                .get_contract_decoders(contract_address)
+                .get_contract_decoders(contract_address.into())
                 .await
                 .unwrap()
                 .unwrap(),

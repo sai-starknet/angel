@@ -5,7 +5,7 @@ use introspect_types::{Attribute, ColumnDef, ColumnInfo, TypeDef};
 use itertools::Itertools;
 use sqlx::types::Json;
 use sqlx::{FromRow, PgPool};
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use torii_sql::SqlxResult;
 
 use crate::postgres::{attribute_type, felt252_type, string_type, PgAttribute, PgFelt};

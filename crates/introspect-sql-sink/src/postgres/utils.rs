@@ -1,4 +1,4 @@
-use starknet_types_raw::Felt;
+use starknet_types_core::felt::Felt;
 use xxhash_rust::xxh3::Xxh3;
 
 pub fn truncate(s: &str, max_chars: usize) -> &str {
@@ -72,7 +72,7 @@ pub trait AsBytes {
 
 impl AsBytes for Felt {
     fn as_bytes(&self) -> Vec<u8> {
-        self.into()
+        self.to_bytes_be().to_vec()
     }
 }
 

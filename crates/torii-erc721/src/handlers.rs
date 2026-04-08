@@ -1,3 +1,6 @@
+use crate::conversions::{
+    core_to_primitive_u256, core_to_raw_felt, primitive_to_core_u256, u256_to_bytes,
+};
 use anyhow::Result;
 use async_trait::async_trait;
 use prost::Message;
@@ -10,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use torii::command::CommandHandler;
 use torii::etl::sink::EventBus;
 use torii::UpdateType;
-use torii_common::{process_token_uri_request, u256_to_bytes, MetadataFetcher, TokenUriRequest};
+use torii_common::{process_token_uri_request, MetadataFetcher, TokenUriRequest};
 
 use crate::proto;
 use crate::storage::Erc721Storage;
@@ -114,7 +117,10 @@ impl CommandHandler for Erc721MetadataCommandHandler {
 
         let mut attempt = 1;
         let result = loop {
-            let meta = self.fetcher.fetch_erc721_metadata(command.token).await;
+            let meta = self
+                .fetcher
+                .fetch_erc721_metadata(core_to_raw_felt(command.token))
+                .await;
             if !Self::metadata_complete(&meta) && attempt < self.max_retries {
                 let next_attempt = attempt + 1;
                 let delay = Self::metadata_retry_delay(next_attempt);
@@ -140,7 +146,7 @@ impl CommandHandler for Erc721MetadataCommandHandler {
                         command.token,
                         meta.name.as_deref(),
                         meta.symbol.as_deref(),
-                        meta.total_supply,
+                        meta.total_supply.map(primitive_to_core_u256),
                     )
                     .await?;
 
@@ -150,7 +156,10 @@ impl CommandHandler for Erc721MetadataCommandHandler {
                         token: command.token.to_bytes_be().to_vec(),
                         name: meta.name,
                         symbol: meta.symbol,
-                        total_supply: meta.total_supply.map(u256_to_bytes),
+                        total_supply: meta
+                            .total_supply
+                            .map(primitive_to_core_u256)
+                            .map(u256_to_bytes),
                     };
 
                     let mut buf = Vec::new();
@@ -255,8 +264,8 @@ impl CommandHandler for Erc721TokenUriCommandHandler {
             self.fetcher.as_ref(),
             self.storage.as_ref(),
             &TokenUriRequest {
-                contract: command.contract,
-                token_id: command.token_id,
+                contract: core_to_raw_felt(command.contract),
+                token_id: core_to_primitive_u256(command.token_id),
                 standard: torii_common::TokenStandard::Erc721,
             },
             self.image_cache_dir.as_deref(),
