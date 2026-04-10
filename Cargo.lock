@@ -4798,7 +4798,6 @@ dependencies = [
  "torii-erc20",
  "torii-erc721",
  "torii-introspect",
- "torii-introspect-sql-sink",
  "torii-log-sink",
  "torii-pathfinder",
  "torii-sql",
