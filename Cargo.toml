@@ -2,13 +2,6 @@
 members = [
   ".",
   "crates/torii-common",
-  "crates/torii-config-common",
-  "crates/torii-runtime-common",
-  "crates/torii-sql-sink",
-  "crates/torii-log-sink",
-  "crates/torii-controllers-sink",
-  "crates/arcade-sink",
-  "crates/torii-ecs-sink",
   "crates/torii-erc20",
   "crates/torii-erc721",
   "crates/torii-erc1155",
@@ -19,19 +12,6 @@ members = [
   "crates/testing",
   "crates/pathfinder",
   "crates/types",
-  "bins/torii-erc20",
-  "bins/torii-erc20-synth",
-  "bins/torii-introspect-bin",
-  "bins/torii-introspect-synth",
-  "bins/torii-arcade",
-  "bins/torii-tokens",
-  "bins/torii-tokens-synth",
-]
-default-members = [
-  "bins/torii-erc20",
-  "bins/torii-arcade",
-  "bins/torii-tokens",
-  "bins/torii-introspect-bin",
 ]
 resolver = "2"
 
