@@ -987,6 +987,7 @@ dependencies = [
 [[package]]
 name = "dojo-introspect"
 version = "0.1.0"
+source = "git+https://github.com/dojoengine/dojo-introspect?rev=fd99a0a#fd99a0a3fe5698e1d26bbf06d8ff7d5fcc541a77"
 dependencies = [
  "async-trait",
  "introspect-rust-macros",
@@ -1958,6 +1959,7 @@ dependencies = [
 [[package]]
 name = "introspect-events"
 version = "0.1.2"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "cainome-cairo-serde",
  "introspect-types",
@@ -1969,6 +1971,7 @@ dependencies = [
 [[package]]
 name = "introspect-rust-macros"
 version = "0.1.0"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "paste",
  "proc-macro2",
@@ -1980,6 +1983,7 @@ dependencies = [
 [[package]]
 name = "introspect-types"
 version = "0.1.2"
+source = "git+https://github.com/cartridge-gg/introspect?rev=b89ee9e#b89ee9ead02df170195bb4f67a48e4308edab855"
 dependencies = [
  "blake3",
  "convert_case",
