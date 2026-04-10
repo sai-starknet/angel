@@ -10,8 +10,7 @@ introspect-types.workspace = true
 introspect-rust-macros.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-starknet.workspace = true
-starknet-types-core.workspace = true
+starknet-types-raw.workspace = true
 torii.workspace = true
 blake3.workspace = true
 thiserror.workspace = true
@@ -28,6 +27,7 @@ async-trait.workspace = true
 bigdecimal.workspace = true
 
 torii-common.workspace = true
+torii-sql = { workspace = true, features = ["postgres", "sqlite"] }
 
 [build-dependencies]
 tonic-build = "0.12"

@@ -4,15 +4,18 @@
 //! making `starknet_call` requests. Handles both snake_case and camelCase
 //! selectors, felt-encoded strings and ByteArray returns.
 
+use primitive_types::U256;
 use starknet::core::codec::Decode;
-use starknet::core::types::{
-    requests::CallRequest, BlockId, BlockTag, ByteArray, Felt, FunctionCall, U256,
-};
+use starknet::core::types::requests::CallRequest;
+use starknet::core::types::{BlockId, BlockTag, ByteArray, Felt as SnFelt, FunctionCall};
 use starknet::core::utils::parse_cairo_short_string;
 use starknet::macros::selector;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
 use std::sync::Arc;
+
+use crate::utils::felts_to_u256;
 
 /// Token metadata (common fields for all ERC standards)
 #[derive(Debug, Clone, Default)]
@@ -85,11 +88,13 @@ impl MetadataFetcher {
     /// Returns None if the call fails or returns empty data.
     pub async fn fetch_token_uri(&self, contract: Felt, token_id: Felt) -> Option<String> {
         // Try snake_case first, then camelCase
+        let contract = contract.into();
+        let token_id = token_id.into();
         for sel in [selector!("token_uri"), selector!("tokenURI")] {
             let call = FunctionCall {
                 contract_address: contract,
                 entry_point_selector: sel,
-                calldata: vec![token_id, Felt::ZERO], // u256: (low, high)
+                calldata: vec![token_id, SnFelt::ZERO], // u256: (low, high)
             };
 
             if let Ok(result) = self
@@ -132,10 +137,13 @@ impl MetadataFetcher {
     /// Fetch `uri(token_id)` for ERC1155 tokens.
     pub async fn fetch_uri(&self, contract: Felt, token_id: Felt) -> Option<String> {
         // ERC1155 uses `uri(token_id)` — u256 arg
+        let contract = contract.into();
+        let token_id = token_id.into();
+
         let call = FunctionCall {
             contract_address: contract,
             entry_point_selector: selector!("uri"),
-            calldata: vec![token_id, Felt::ZERO],
+            calldata: vec![token_id, SnFelt::ZERO],
         };
 
         if let Ok(result) = self
@@ -206,7 +214,7 @@ impl MetadataFetcher {
         };
 
         let call = FunctionCall {
-            contract_address: contract,
+            contract_address: contract.into(),
             entry_point_selector: sel,
             calldata: vec![],
         };
@@ -233,7 +241,7 @@ impl MetadataFetcher {
     /// Fetch `decimals()` from an ERC20 contract.
     async fn fetch_decimals(&self, contract: Felt) -> Option<u8> {
         let call = FunctionCall {
-            contract_address: contract,
+            contract_address: contract.into(),
             entry_point_selector: selector!("decimals"),
             calldata: vec![],
         };
@@ -276,7 +284,7 @@ impl MetadataFetcher {
     async fn fetch_total_supply(&self, contract: Felt) -> Option<U256> {
         for sel in [selector!("total_supply"), selector!("totalSupply")] {
             let call = FunctionCall {
-                contract_address: contract,
+                contract_address: contract.into(),
                 entry_point_selector: sel,
                 calldata: vec![],
             };
@@ -290,13 +298,7 @@ impl MetadataFetcher {
                     continue;
                 }
                 // U256 return: [low, high] or single felt
-                let low: u128 = result[0].try_into().unwrap_or(0);
-                return Some(if result.len() == 1 {
-                    U256::from(low)
-                } else {
-                    let high: u128 = result[1].try_into().unwrap_or(0);
-                    U256::from_words(low, high)
-                });
+                return felts_to_u256(&result.into_iter().map(Into::into).collect::<Vec<_>>()).ok();
             }
         }
 
@@ -309,7 +311,7 @@ impl MetadataFetcher {
     /// 1. **Single short string** (felt): via `parse_cairo_short_string`
     /// 2. **Cairo ByteArray**: via `ByteArray::decode` (the standard Cairo string type)
     /// 3. **Legacy array**: `[len, felt1, felt2, ...]` where each felt is a short string segment
-    fn decode_string_result(result: &[Felt]) -> Option<String> {
+    fn decode_string_result(result: &[SnFelt]) -> Option<String> {
         if result.is_empty() {
             return None;
         }
@@ -355,7 +357,7 @@ impl MetadataFetcher {
     async fn fetch_string_calls_batch(
         &self,
         requests: &[(Felt, Felt)],
-        attempts: &[(Felt, bool)],
+        attempts: &[(SnFelt, bool)],
     ) -> Vec<Option<String>> {
         if requests.is_empty() {
             return Vec::new();
@@ -374,13 +376,13 @@ impl MetadataFetcher {
                 .map(|&idx| {
                     let (contract, token_id) = requests[idx];
                     let calldata = if use_u256 {
-                        vec![token_id, Felt::ZERO]
+                        vec![token_id.into(), SnFelt::ZERO]
                     } else {
-                        vec![token_id]
+                        vec![token_id.into()]
                     };
                     ProviderRequestData::Call(CallRequest {
                         request: FunctionCall {
-                            contract_address: contract,
+                            contract_address: contract.into(),
                             entry_point_selector: selector,
                             calldata,
                         },
@@ -435,13 +437,13 @@ mod tests {
     #[test]
     fn test_parse_short_string() {
         // "ETH" = 0x455448
-        let felt = Felt::from(0x455448u64);
+        let felt = SnFelt::from(0x455448u64);
         assert_eq!(parse_cairo_short_string(&felt).unwrap(), "ETH".to_string());
     }
 
     #[test]
     fn test_decode_single_felt_string() {
-        let result = vec![Felt::from(0x455448u64)]; // "ETH"
+        let result = vec![SnFelt::from(0x455448u64)]; // "ETH"
         assert_eq!(
             MetadataFetcher::decode_string_result(&result),
             Some("ETH".to_string())
@@ -452,9 +454,9 @@ mod tests {
     fn test_decode_byte_array() {
         // ByteArray: [data_len=0, pending_word="ETH", pending_word_len=3]
         let result = vec![
-            Felt::from(0u64),        // data_len = 0 chunks
-            Felt::from(0x455448u64), // pending_word = "ETH"
-            Felt::from(3u64),        // pending_word_len = 3
+            SnFelt::from(0u64),        // data_len = 0 chunks
+            SnFelt::from(0x455448u64), // pending_word = "ETH"
+            SnFelt::from(3u64),        // pending_word_len = 3
         ];
         assert_eq!(
             MetadataFetcher::decode_string_result(&result),

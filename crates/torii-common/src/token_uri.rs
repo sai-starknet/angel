@@ -17,7 +17,8 @@
 //! - JSON sanitization for broken metadata (control chars, unescaped quotes)
 //! - Raw JSON fallback for inline metadata
 
-use starknet::core::types::{Felt, U256};
+use primitive_types::U256;
+use starknet_types_raw::Felt;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -470,7 +471,8 @@ impl TokenUriService {
         let mut erc1155_requests = Vec::new();
 
         for (idx, request) in requests.iter().enumerate() {
-            let token_id = Felt::from(request.token_id.low());
+            // let token_id = Felt::from(request.token_id.low());
+            let token_id = Felt::from_le_words(request.token_id.0); // CHECK: same logic
             match request.standard {
                 TokenStandard::Erc721 => {
                     erc721_positions.push(idx);
@@ -804,7 +806,7 @@ async fn fetch_token_uri_with_retry(
     standard: TokenStandard,
 ) -> Option<String> {
     // Use the MetadataFetcher which already tries multiple selectors
-    let token_id_felt = Felt::from(token_id.low());
+    let token_id_felt = Felt::from_le_words(token_id.0); // CHECK: same logic as before
 
     match standard {
         TokenStandard::Erc721 => fetcher.fetch_token_uri(contract, token_id_felt).await,

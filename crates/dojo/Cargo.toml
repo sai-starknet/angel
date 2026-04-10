@@ -11,26 +11,31 @@ serde.workspace = true
 starknet-types-core.workspace = true
 starknet.workspace = true
 tokio.workspace = true
-torii-common.workspace = true
-torii.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 hex.workspace = true
 itertools.workspace = true
-
-dojo-introspect.workspace = true
-introspect-types.workspace = true
-torii-introspect.workspace = true
-torii-postgres.workspace = true
-torii-sqlite.workspace = true
 sqlx = { workspace = true, features = [
-    "postgres",
-    "sqlite",
     "runtime-tokio-rustls",
     "macros",
     "migrate",
 ] }
+
+starknet-types-raw.workspace = true
+dojo-introspect.workspace = true
+introspect-types.workspace = true
+
+torii-introspect.workspace = true
+torii-sql.workspace = true
+torii-types.workspace = true
+torii-common.workspace = true
+torii.workspace = true
+
+
+[features]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
 
 [build-dependencies]
 tonic-build.workspace = true

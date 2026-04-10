@@ -37,12 +37,14 @@
 
 pub mod balance_fetcher;
 pub mod decoder;
-pub mod grpc_service;
-pub mod handlers;
-pub mod identification;
+pub mod event;
+// pub mod grpc_service;
+// pub mod handlers;
+// pub mod identification;
+// pub mod sink;
 pub mod sink;
 pub mod storage;
-pub mod synthetic;
+// pub mod synthetic;
 
 // Include generated protobuf code
 pub mod proto {
@@ -54,13 +56,16 @@ pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/erc20_descripto
 
 // Re-export main types for convenience
 pub use balance_fetcher::{BalanceFetchRequest, BalanceFetcher};
-pub use decoder::{Approval, Erc20Decoder, Transfer};
-pub use grpc_service::Erc20Service;
-pub use handlers::Erc20MetadataCommandHandler;
-pub use identification::Erc20Rule;
-pub use sink::Erc20Sink;
-pub use storage::{
-    ApprovalCursor, ApprovalData, BalanceAdjustment, BalanceData, Erc20Storage, TransferCursor,
-    TransferData, TransferDirection,
+pub use decoder::Erc20Decoder;
+pub use event::{
+    Erc20Msg, ERC20_APPROVAL_SELECTOR_TYPE_ID, ERC20_TRANSFER_SELECTOR_TYPE_ID, ERC20_TYPE_ID,
 };
-pub use synthetic::{SyntheticErc20Config, SyntheticErc20Extractor};
+// pub use grpc_service::Erc20Service;
+// pub use handlers::Erc20MetadataCommandHandler;
+// pub use identification::Erc20Rule;
+// pub use sink::Erc20Sink;
+// pub use storage::{
+//     ApprovalCursor, ApprovalData, BalanceAdjustment, BalanceData, Erc20Storage, TransferCursor,
+//     TransferData, TransferDirection,
+// };
+// pub use synthetic::{SyntheticErc20Config, SyntheticErc20Extractor};

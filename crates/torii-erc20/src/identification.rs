@@ -6,7 +6,7 @@
 //! - `Transfer` event
 
 use anyhow::Result;
-use starknet::core::types::Felt;
+use starknet_types_raw::Felt;
 use torii::etl::decoder::DecoderId;
 use torii::etl::extractor::ContractAbi;
 use torii::etl::identification::IdentificationRule;

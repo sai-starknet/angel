@@ -1,11 +1,9 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet::core::types::EmittedEvent;
+use starknet_types_raw::event::EmittedEvent;
 use std::any::Any;
-use torii::etl::{
-    envelope::{Envelope, TypeId, TypedBody},
-    Decoder,
-};
+use torii::etl::envelope::{Envelope, TypeId, TypedBody};
+use torii::etl::Decoder;
 
 /// Decoded log entry
 #[derive(Debug, Clone)]
@@ -50,10 +48,17 @@ impl Decoder for LogDecoder {
         "log"
     }
 
-    async fn decode_event(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(
+        &self,
+        from_address: Felt,
+        keys: &[Felt],
+        data: &[Felt],
+        block_number: u64,
+        transaction_hash: Felt,
+    ) -> Result<Vec<Envelope>> {
         // Apply key filter if specified
         if let Some(ref filter) = self.key_filter {
-            let matches = event.keys.iter().any(|k| {
+            let matches = keys.iter().any(|k| {
                 let key_hex = format!("{k:#x}");
                 key_hex.contains(filter)
             });
@@ -64,29 +69,29 @@ impl Decoder for LogDecoder {
 
         // Extract log message from event data.
         // For this example, we'll convert the first data field to a string representation.
-        let message = if event.data.is_empty() {
+        let message = if data.is_empty() {
             "Empty event data".to_string()
         } else {
-            format!("Event data: {:#x}", event.data[0])
+            format!("Event data: {:#x}", data[0])
         };
 
-        let event_key = if event.keys.is_empty() {
+        let event_key = if keys.is_empty() {
             "no-key".to_string()
         } else {
-            format!("{:#x}", event.keys[0])
+            format!("{:#x}", keys[0])
         };
 
         let log_entry = LogEntry {
             message,
-            block_number: event.block_number.unwrap_or(0),
+            block_number,
             event_key,
         };
 
         // Create envelope with unique ID
         let envelope_id = format!(
             "log_{}_{}",
-            event.block_number.unwrap_or(0),
-            format!("{:#x}", event.transaction_hash)
+            block_number,
+            format!("{:#x}", transaction_hash)
         );
         let envelope = Envelope::new(
             envelope_id,
@@ -101,18 +106,18 @@ impl Decoder for LogDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use starknet::core::types::Felt;
+    use starknet_types_raw::Felt;
+    use torii::etl::StarknetEvent;
 
     #[tokio::test]
     async fn test_decode_logs() {
         let decoder = LogDecoder::new(None);
 
-        let event = EmittedEvent {
+        let event = StarknetEvent {
             from_address: Felt::from(1u64),
             keys: vec![Felt::from(0x1234u64)],
             data: vec![Felt::from(0x5678u64)],
-            block_hash: None,
-            block_number: Some(100),
+            block_number: 100,
             transaction_hash: Felt::from(0xabcdu64),
         };
 

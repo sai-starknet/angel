@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use introspect_types::{
-    cairo_event_name_and_selector, CairoDeserialize, CairoDeserializer, CairoEvent, CairoSerde,
-    DecodeResult, FeltSource,
+    CairoDeserialize, CairoDeserializer, CairoEvent, CairoEventInfo, CairoSerde, DecodeResult,
+    FeltSource,
 };
 use serde::{Deserialize, Serialize};
-use starknet::core::types::Felt;
+use starknet_types_raw::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -64,10 +64,9 @@ impl<D: FeltSource> CairoEvent<CairoSerde<D>> for ExternalContractRegisteredEven
     }
 }
 
-cairo_event_name_and_selector!(
-    ExternalContractRegisteredEvent,
-    "ExternalContractRegistered"
-);
+impl CairoEventInfo for ExternalContractRegisteredEvent {
+    const NAME: &'static str = "ExternalContractRegistered";
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalContractRegistered {

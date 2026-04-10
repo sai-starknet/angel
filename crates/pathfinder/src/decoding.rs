@@ -1,12 +1,12 @@
 use crate::sqlite::BlockEventsRow;
 use crate::{PFError, PFResult};
 use serde::{Deserialize, Serialize};
+use starknet_types_raw::event::Event;
+use starknet_types_raw::Felt;
 use std::cell::RefCell;
 use std::fmt::{Formatter, Result as FmtResult};
 use std::io::Result as IoResult;
 use std::sync::LazyLock;
-use torii_starknet::event::Event;
-use torii_starknet::Felt;
 use zstd::bulk::Decompressor;
 
 // Taken from pathfinder-common but with some optimizations

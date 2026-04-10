@@ -1,23 +1,20 @@
 use super::DojoStoreTrait;
 use crate::decoder::primary_field_def;
 use crate::table::DojoTableInfo;
-use crate::DojoTable;
+use crate::{DojoTable, DojoToriiError, DojoToriiResult};
 use async_trait::async_trait;
-use introspect_types::{Attribute, ColumnInfo, ResultInto, TypeDef};
+use introspect_types::{Attribute, ColumnInfo, TypeDef};
 use itertools::Itertools;
 use sqlx::migrate::Migrator;
-use sqlx::postgres::PgArguments;
 use sqlx::query::Query;
 use sqlx::types::Json;
-use sqlx::{FromRow, Postgres};
-use starknet_types_core::felt::Felt;
+use sqlx::FromRow;
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
-use std::ops::Deref;
-use torii_common::sql::SqlxResult;
 use torii_introspect::postgres::owned::PgTypeDef;
 use torii_introspect::postgres::PgFelt;
 use torii_introspect::schema::ColumnKeyTrait;
-use torii_postgres::db::PostgresConnection;
+use torii_sql::{PgArguments, PgPool, PoolExt, Postgres, SqlxResult};
 
 pub const FETCH_TABLES_QUERY: &str = r#"
     SELECT DISTINCT ON (owner, id)
@@ -87,7 +84,7 @@ pub const INSERT_COLUMN_QUERY: &str = r#"
         updated_at = NOW(),
         updated_tx = EXCLUDED.updated_tx"#;
 
-pub const DOJO_STORE_MIGRATIONS: Migrator = sqlx::migrate!();
+pub const DOJO_STORE_MIGRATIONS: Migrator = sqlx::migrate!("./migrations/postgres");
 
 #[derive(Debug, thiserror::Error)]
 pub enum DojoPgStoreError {
@@ -101,8 +98,6 @@ pub enum DojoPgStoreError {
         table_id: Felt,
         column_id: Felt,
     },
-    #[error("Duplicate tables found for owner {owner:?} and table id {table_id}")]
-    DuplicateTables { owner: Felt, table_id: Felt },
 }
 
 impl DojoPgStoreError {
@@ -191,65 +186,37 @@ where
     }
 }
 
-// #[async_trait]
-// impl PgTypeDef<Felt> for DojoTableInfo {
-//     type Row = DojoTableRow;
-//     async fn get_rows(
-//         pool: &PgPool,
-//         query: &'static str,
-//         owners: &[Felt],
-//     ) -> SqlxResult<Vec<(Felt, DojoTableInfo)>> {
-//         Self::get_pg_rows(pool, query, owners)
-//             .await
-//             .map(|rows| rows.into_iter().map_into().collect_vec())
-//     }
-// }
-
-// #[async_trait]
-// impl PgTypeDef<()> for DojoTable {
-//     type Row = DojoTableRow;
-//     async fn get_rows(
-//         pool: &PgPool,
-//         query: &'static str,
-//         owners: &[Felt],
-//     ) -> SqlxResult<Vec<((), DojoTable)>> {
-//         Self::get_pg_rows(pool, query, owners)
-//             .await
-//             .map(|rows| rows.into_iter().map_into().collect_vec())
-//     }
-// }
-
 pub fn table_insert_query(
-    owner: &Felt,
-    id: &Felt,
+    owner: Felt,
+    id: Felt,
     block_number: u64,
     name: &str,
     attributes: &[String],
     keys: &[Felt],
     values: &[Felt],
     legacy: bool,
-    created_tx: &Felt,
+    created_tx: Felt,
 ) -> Query<'static, Postgres, PgArguments> {
     sqlx::query::<Postgres>(INSERT_TABLE_QUERY)
-        .bind(PgFelt::from(*owner))
-        .bind(PgFelt::from(*id))
+        .bind(PgFelt::from(owner))
+        .bind(PgFelt::from(id))
         .bind(block_number.to_string())
         .bind(name.to_owned())
         .bind(attributes.to_owned())
         .bind(keys.iter().copied().map(PgFelt::from).collect_vec())
         .bind(values.iter().copied().map(PgFelt::from).collect_vec())
         .bind(legacy)
-        .bind(PgFelt::from(*created_tx))
+        .bind(PgFelt::from(created_tx))
 }
 
 pub fn column_info_insert_query(
     query: &'static str,
-    owner: &Felt,
-    table: &Felt,
-    id: &Felt,
+    owner: Felt,
+    table: Felt,
+    id: Felt,
     block_number: u64,
     info: &ColumnInfo,
-    created_tx: &Felt,
+    created_tx: Felt,
 ) -> Query<'static, Postgres, PgArguments> {
     column_insert_query(
         query,
@@ -266,36 +233,36 @@ pub fn column_info_insert_query(
 
 pub fn column_insert_query(
     query: &'static str,
-    owner: &Felt,
-    table: &Felt,
-    id: &Felt,
+    owner: Felt,
+    table: Felt,
+    id: Felt,
     block_number: u64,
     name: &str,
     attributes: Vec<String>,
     type_def: &TypeDef,
-    created_tx: &Felt,
+    created_tx: Felt,
 ) -> Query<'static, Postgres, PgArguments> {
     sqlx::query::<Postgres>(query)
-        .bind(PgFelt::from(*owner))
-        .bind(PgFelt::from(*table))
-        .bind(PgFelt::from(*id))
+        .bind(PgFelt::from(owner))
+        .bind(PgFelt::from(table))
+        .bind(PgFelt::from(id))
         .bind(block_number.to_string())
         .bind(name.to_owned())
         .bind(attributes)
         .bind(Json(type_def.clone()))
-        .bind(PgFelt::from(*created_tx))
+        .bind(PgFelt::from(created_tx))
 }
 
 impl DojoTable {
     pub fn insert_query(
         &self,
-        owner: &Felt,
-        tx_hash: &Felt,
+        owner: Felt,
+        tx_hash: Felt,
         block_number: u64,
     ) -> Query<'static, Postgres, PgArguments> {
         table_insert_query(
             owner,
-            &self.id,
+            self.id,
             block_number,
             &self.name,
             &self.attributes,
@@ -309,74 +276,82 @@ impl DojoTable {
 
 pub struct PgStore<T>(pub T);
 
-impl<T> Deref for PgStore<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl<T: PoolExt<Postgres>> PoolExt<Postgres> for PgStore<T> {
+    fn pool(&self) -> &PgPool {
+        self.0.pool()
     }
 }
 
-impl<T: PostgresConnection + Send + Sync> PgStore<T> {
+impl<T: PoolExt<Postgres> + Send + Sync> PgStore<T> {
     pub async fn initialize(&self) -> SqlxResult<()> {
         self.migrate(Some("dojo"), DOJO_STORE_MIGRATIONS).await
     }
 }
 
-impl<T: PostgresConnection> From<T> for PgStore<T> {
+impl<T: PoolExt<Postgres>> From<T> for PgStore<T> {
     fn from(pool: T) -> Self {
         PgStore(pool)
     }
 }
 
 #[async_trait]
-impl<T: PostgresConnection + Send + Sync + 'static> DojoStoreTrait for PgStore<T> {
-    type Error = DojoPgStoreError;
-
+impl DojoStoreTrait for PgPool {
+    async fn initialize(&self) -> DojoToriiResult {
+        self.migrate(Some("dojo"), DOJO_STORE_MIGRATIONS)
+            .await
+            .map_err(DojoToriiError::store_error)
+    }
     async fn save_table(
         &self,
-        owner: &Felt,
+        owner: Felt,
         table: &DojoTable,
-        tx_hash: &Felt,
+        tx_hash: Felt,
         block_number: u64,
-    ) -> Result<(), Self::Error> {
-        let mut transaction = self.begin().await?;
+    ) -> DojoToriiResult {
+        let mut transaction = self.begin().await.map_err(DojoToriiError::store_error)?;
         table
             .insert_query(owner, tx_hash, block_number)
             .execute(&mut *transaction)
-            .await?;
-        for (id, info) in &table.columns {
+            .await
+            .map_err(DojoToriiError::store_error)?;
+        for (&id, info) in &table.columns {
             column_info_insert_query(
                 INSERT_COLUMN_QUERY,
                 owner,
-                &table.id,
+                table.id,
                 id,
                 block_number,
                 info,
                 tx_hash,
             )
             .execute(&mut *transaction)
-            .await?;
+            .await
+            .map_err(DojoToriiError::store_error)?;
         }
 
-        transaction.commit().await.err_into()
+        transaction
+            .commit()
+            .await
+            .map_err(DojoToriiError::store_error)
     }
 
-    async fn read_tables(&self, owners: &[Felt]) -> Result<Vec<DojoTable>, Self::Error> {
+    async fn read_tables(&self, owners: &[Felt]) -> DojoToriiResult<Vec<DojoTable>> {
         let mut tables =
             PgTypeDef::get_rows::<DojoTableRow>(self.pool(), FETCH_TABLES_QUERY, owners)
-                .await?
+                .await
+                .map_err(DojoToriiError::store_error)?
                 .into_iter()
                 .map(|row: ((), DojoTable)| row.1)
                 .collect_vec();
         let mut columns: HashMap<(Felt, Felt), _> =
             ColumnInfo::get_hash_map::<DojoColumnRow>(self.pool(), FETCH_COLUMNS_QUERY, owners)
-                .await?;
+                .await
+                .map_err(DojoToriiError::store_error)?;
         for table in &mut tables {
             for key in table.key_fields.iter().chain(table.value_fields.iter()) {
-                let column = columns.remove(&(table.id, *key)).ok_or_else(|| {
-                    DojoPgStoreError::column_not_found(table.name.clone(), &(table.id, *key))
-                })?;
+                let column = columns
+                    .remove(&(table.id, *key))
+                    .ok_or_else(|| DojoToriiError::ColumnNotFound(table.name.clone(), *key))?;
                 table.columns.insert(*key, column);
             }
         }

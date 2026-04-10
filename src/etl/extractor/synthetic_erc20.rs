@@ -6,12 +6,12 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
-use starknet::macros::selector;
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::etl::engine_db::EngineDb;
+use crate::etl::StarknetEvent;
 
 use super::{BlockContext, ExtractionBatch, Extractor, TransactionContext};
 
@@ -210,21 +210,19 @@ impl SyntheticErc20Extractor {
                 let amount_low = self.amount_low_for(block_number, tx_index);
 
                 let event = if self.is_approval(tx_index) {
-                    EmittedEvent {
+                    StarknetEvent {
                         from_address: token,
-                        keys: vec![selector!("Approval"), from, to],
+                        keys: vec![Felt::selector("Approval"), from, to],
                         data: vec![amount_low, Felt::ZERO],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
+                        block_number: block_number,
                         transaction_hash: tx_hash,
                     }
                 } else {
-                    EmittedEvent {
+                    StarknetEvent {
                         from_address: token,
-                        keys: vec![selector!("Transfer"), from, to],
+                        keys: vec![Felt::selector("Transfer"), from, to],
                         data: vec![amount_low, Felt::ZERO],
-                        block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
-                        block_number: Some(block_number),
+                        block_number: block_number,
                         transaction_hash: tx_hash,
                     }
                 };

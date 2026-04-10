@@ -17,10 +17,10 @@ pub mod proto {
 }
 
 // Re-export commonly used types for external sink authors
+use crate::etl::StarknetEvent;
 pub use async_trait::async_trait;
-pub use axum;
-pub use tokio;
-pub use tonic;
+
+pub use {axum, tokio, tonic};
 
 // Re-export UpdateType for sink implementations
 pub use grpc::UpdateType;
@@ -47,6 +47,7 @@ use etl::sink::{EventBus, Sink};
 use etl::{Decoder, DecoderContext, MultiSink, SampleExtractor};
 use grpc::{create_grpc_service, GrpcState, SubscriptionManager};
 use http::create_http_router;
+use starknet_types_raw::Felt;
 
 // Include the file descriptor set generated at build time.
 // This is also exported publicly so external sink authors can use it for reflection.
@@ -126,7 +127,7 @@ pub struct ToriiConfig {
     pub events_per_cycle: usize,
 
     /// Sample events for testing (provided by sinks).
-    pub sample_events: Vec<starknet::core::types::EmittedEvent>,
+    pub sample_events: Vec<StarknetEvent>,
 
     /// Extractor for fetching blockchain events.
     ///
@@ -163,13 +164,8 @@ pub struct ToriiConfig {
     /// contract→decoder mappings for contracts not in explicit mappings.
     /// The cache is typically populated by a ContractRegistry running batch
     /// identification before decoding.
-    pub registry_cache: Option<
-        Arc<
-            tokio::sync::RwLock<
-                std::collections::HashMap<starknet::core::types::Felt, Vec<DecoderId>>,
-            >,
-        >,
-    >,
+    pub registry_cache:
+        Option<Arc<tokio::sync::RwLock<std::collections::HashMap<Felt, Vec<DecoderId>>>>>,
 
     /// Optional contract identifier for runtime identification.
     ///
@@ -243,19 +239,14 @@ pub struct ToriiConfigBuilder {
     custom_reflection: bool,
     cycle_interval: Option<u64>,
     events_per_cycle: Option<usize>,
-    sample_events: Vec<starknet::core::types::EmittedEvent>,
+    sample_events: Vec<StarknetEvent>,
     extractor: Option<Box<dyn Extractor>>,
     database_root: Option<PathBuf>,
     engine_database_url: Option<String>,
     contract_filter: Option<ContractFilter>,
     identification_rules: Vec<Box<dyn IdentificationRule>>,
-    registry_cache: Option<
-        Arc<
-            tokio::sync::RwLock<
-                std::collections::HashMap<starknet::core::types::Felt, Vec<DecoderId>>,
-            >,
-        >,
-    >,
+    registry_cache:
+        Option<Arc<tokio::sync::RwLock<std::collections::HashMap<Felt, Vec<DecoderId>>>>>,
     contract_identifier: Option<Arc<dyn ContractIdentifier>>,
     shutdown_timeout: Option<u64>,
     etl_concurrency: Option<EtlConcurrencyConfig>,
@@ -364,7 +355,7 @@ impl ToriiConfigBuilder {
     }
 
     /// Adds sample events for testing.
-    pub fn with_sample_events(mut self, events: Vec<starknet::core::types::EmittedEvent>) -> Self {
+    pub fn with_sample_events(mut self, events: Vec<StarknetEvent>) -> Self {
         self.sample_events.extend(events);
         self
     }
@@ -419,11 +410,7 @@ impl ToriiConfigBuilder {
     ///
     /// Events from this contract will ONLY be tried with the specified decoders.
     /// This provides O(k) performance where k is the number of mapped decoders.
-    pub fn map_contract(
-        mut self,
-        contract: starknet::core::types::Felt,
-        decoder_ids: Vec<DecoderId>,
-    ) -> Self {
+    pub fn map_contract(mut self, contract: Felt, decoder_ids: Vec<DecoderId>) -> Self {
         self.contract_filter
             .get_or_insert_with(ContractFilter::new)
             .mappings
@@ -434,7 +421,7 @@ impl ToriiConfigBuilder {
     /// Add contract to blacklist (fast discard).
     ///
     /// Events from this contract will be discarded immediately (O(1) check).
-    pub fn blacklist_contract(mut self, contract: starknet::core::types::Felt) -> Self {
+    pub fn blacklist_contract(mut self, contract: Felt) -> Self {
         self.contract_filter
             .get_or_insert_with(ContractFilter::new)
             .blacklist
@@ -445,7 +432,7 @@ impl ToriiConfigBuilder {
     /// Add multiple contracts to blacklist.
     ///
     /// Events from these contracts will be discarded immediately (O(1) check).
-    pub fn blacklist_contracts(mut self, contracts: Vec<starknet::core::types::Felt>) -> Self {
+    pub fn blacklist_contracts(mut self, contracts: Vec<Felt>) -> Self {
         self.contract_filter
             .get_or_insert_with(ContractFilter::new)
             .blacklist
@@ -504,11 +491,7 @@ impl ToriiConfigBuilder {
     /// ```
     pub fn with_registry_cache(
         mut self,
-        cache: Arc<
-            tokio::sync::RwLock<
-                std::collections::HashMap<starknet::core::types::Felt, Vec<DecoderId>>,
-            >,
-        >,
+        cache: Arc<tokio::sync::RwLock<std::collections::HashMap<Felt, Vec<DecoderId>>>>,
     ) -> Self {
         self.registry_cache = Some(cache);
         self
@@ -839,9 +822,8 @@ pub async fn run(config: ToriiConfig) -> Result<(), Box<dyn std::error::Error>> 
         let queue_depth = Arc::new(AtomicUsize::new(0));
 
         let (identify_tx, identify_handle) = if let Some(identifier) = contract_identifier.clone() {
-            let (tx, mut rx) = tokio::sync::mpsc::channel::<Vec<starknet::core::types::Felt>>(
-                prefetch_capacity.saturating_mul(2).max(8),
-            );
+            let (tx, mut rx) =
+                tokio::sync::mpsc::channel::<Vec<Felt>>(prefetch_capacity.saturating_mul(2).max(8));
             let handle = tokio::spawn(async move {
                 while let Some(contract_addresses) = rx.recv().await {
                     if contract_addresses.is_empty() {
@@ -903,7 +885,7 @@ pub async fn run(config: ToriiConfig) -> Result<(), Box<dyn std::error::Error>> 
                 let new_cursor = batch.cursor.clone();
 
                 if let Some(ref identify_tx) = producer_identify_tx {
-                    let contract_addresses: Vec<starknet::core::types::Felt> = batch
+                    let contract_addresses: Vec<Felt> = batch
                         .events
                         .iter()
                         .map(|event| event.from_address)
@@ -1095,7 +1077,7 @@ pub async fn run(config: ToriiConfig) -> Result<(), Box<dyn std::error::Error>> 
             }
 
             // Transform the events into envelopes.
-            let envelopes = match etl_decoder_context.decode(&batch.events).await {
+            let envelopes = match etl_decoder_context.decode_events(&batch.events).await {
                 Ok(envelopes) => envelopes,
                 Err(e) => {
                     tracing::error!(target: "torii::etl", "Decode failed: {}", e);

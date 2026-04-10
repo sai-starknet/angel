@@ -5,41 +5,15 @@
 
 pub mod json;
 pub mod metadata;
-pub mod sql;
 pub mod token_uri;
 pub mod utils;
 
-use starknet::core::types::{Felt, U256};
-
 pub use metadata::{MetadataFetcher, TokenMetadata};
+use primitive_types::U256;
 pub use token_uri::{
     process_token_uri_request, TokenStandard, TokenUriRequest, TokenUriResult, TokenUriSender,
     TokenUriService, TokenUriStore,
 };
-
-// ===== Felt conversions =====
-
-/// Convert Felt to 32-byte BLOB for storage (big-endian)
-pub fn felt_to_blob(felt: Felt) -> Vec<u8> {
-    felt.to_bytes_be().to_vec()
-}
-
-/// Convert BLOB back to Felt (big-endian)
-pub fn blob_to_felt(bytes: &[u8]) -> Felt {
-    let mut arr = [0u8; 32];
-    let len = bytes.len().min(32);
-    // Right-align for big-endian (pad zeros on the left)
-    arr[32 - len..].copy_from_slice(&bytes[..len]);
-    Felt::from_bytes_be(&arr)
-}
-
-/// Parse bytes to Felt (returns None if > 32 bytes)
-pub fn bytes_to_felt(bytes: &[u8]) -> Option<Felt> {
-    if bytes.len() > 32 {
-        return None;
-    }
-    Some(blob_to_felt(bytes))
-}
 
 // ===== U256 conversions =====
 
@@ -47,54 +21,19 @@ pub fn bytes_to_felt(bytes: &[u8]) -> Option<Felt> {
 ///
 /// Compression strategy:
 /// - Zero value: 1 byte (0x00)
-/// - Values < 2^128: 1-16 bytes (minimal encoding of low word)
-/// - Values >= 2^128: Full encoding (17-32 bytes)
+/// - Non-zero values: Trim leading zero bytes, store remaining bytes
 pub fn u256_to_blob(value: U256) -> Vec<u8> {
-    let high = value.high();
-    let low = value.low();
-
-    if high == 0 {
-        if low == 0 {
-            return vec![0u8];
-        }
-        let bytes = low.to_be_bytes();
-        let start = bytes.iter().position(|&b| b != 0).unwrap_or(15);
-        return bytes[start..].to_vec();
+    if value.is_zero() {
+        return vec![0];
     }
-
-    let mut result = Vec::with_capacity(32);
-    let high_bytes = high.to_be_bytes();
-    let high_start = high_bytes.iter().position(|&b| b != 0).unwrap_or(15);
-    result.extend_from_slice(&high_bytes[high_start..]);
-    result.extend_from_slice(&low.to_be_bytes());
-    result
+    let bytes = value.to_big_endian();
+    let start = bytes.iter().position(|&b| b != 0).unwrap_or(31);
+    bytes[start..].to_vec()
 }
 
 /// Convert BLOB back to U256 (big-endian)
 pub fn blob_to_u256(bytes: &[u8]) -> U256 {
-    let len = bytes.len();
-
-    if len == 0 {
-        return U256::from(0u64);
-    }
-
-    if len <= 16 {
-        let mut low_bytes = [0u8; 16];
-        low_bytes[16 - len..].copy_from_slice(bytes);
-        let low = u128::from_be_bytes(low_bytes);
-        U256::from_words(low, 0)
-    } else {
-        let high_len = len - 16;
-        let mut high_bytes = [0u8; 16];
-        high_bytes[16 - high_len..].copy_from_slice(&bytes[..high_len]);
-        let high = u128::from_be_bytes(high_bytes);
-
-        let mut low_bytes = [0u8; 16];
-        low_bytes.copy_from_slice(&bytes[high_len..]);
-        let low = u128::from_be_bytes(low_bytes);
-
-        U256::from_words(low, high)
-    }
+    U256::from_big_endian(&bytes)
 }
 
 /// Alias for u256_to_blob (same format, different context name)

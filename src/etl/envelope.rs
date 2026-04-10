@@ -1,8 +1,8 @@
 //! This module contains the envelope for the ETL pipeline.
 
-use starknet::core::types::{EmittedEvent, Felt};
 use std::any::Any;
 use std::collections::HashMap;
+use torii_types::event::EventContext;
 use xxhash_rust::const_xxh3::xxh3_64;
 
 /// Type identifier based on a string hash
@@ -110,66 +110,60 @@ impl std::fmt::Debug for Envelope {
 }
 
 #[derive(Debug, Clone)]
-pub struct MetaData {
-    pub block_number: Option<u64>,
-    pub transaction_hash: Felt,
-    pub from_address: Felt,
-}
-
-#[derive(Debug, Clone)]
 pub struct EventBody<T> {
-    pub metadata: MetaData,
+    pub context: EventContext,
     pub msg: T,
 }
 
 pub trait EventMsg: Send + Sync + 'static {
     fn event_id(&self) -> String;
     fn envelope_type_id(&self) -> TypeId;
-    fn to_body(self, raw: &EmittedEvent) -> EventBody<Self>
+    fn to_body(self, context: EventContext) -> EventBody<Self>
     where
         Self: Sized,
     {
-        EventBody {
-            metadata: raw.into(),
-            msg: self,
-        }
+        EventBody { context, msg: self }
     }
-    fn to_envelope(self, raw: &EmittedEvent) -> Envelope
+    fn to_envelope(self, context: EventContext) -> Envelope
     where
         Self: Sized,
     {
-        Envelope::new(self.event_id(), Box::new(self.to_body(raw)), HashMap::new())
+        Envelope::new(
+            self.event_id(),
+            Box::new(self.to_body(context)),
+            HashMap::new(),
+        )
+    }
+    fn to_envelopes(self, context: EventContext) -> Vec<Envelope>
+    where
+        Self: Sized,
+    {
+        vec![self.to_envelope(context)]
+    }
+    fn to_ok_envelopes<E>(self, context: EventContext) -> Result<Vec<Envelope>, E>
+    where
+        Self: Sized,
+    {
+        Ok(self.to_envelopes(context))
     }
 }
 
-impl<T> From<EventBody<T>> for (T, MetaData) {
+impl<T> From<EventBody<T>> for (T, EventContext) {
     fn from(value: EventBody<T>) -> Self {
-        (value.msg, value.metadata)
+        (value.msg, value.context)
     }
 }
 
-impl<T> From<(T, MetaData)> for EventBody<T> {
-    fn from(value: (T, MetaData)) -> Self {
-        let (msg, meta_data) = value;
-        EventBody {
-            msg,
-            metadata: meta_data,
-        }
+impl<T> From<(T, EventContext)> for EventBody<T> {
+    fn from(value: (T, EventContext)) -> Self {
+        let (msg, context) = value;
+        EventBody { msg, context }
     }
 }
 
-impl<'a, T> From<&'a EventBody<T>> for (&'a T, &'a MetaData) {
+impl<'a, T> From<&'a EventBody<T>> for (&'a T, &'a EventContext) {
     fn from(value: &'a EventBody<T>) -> Self {
-        (&value.msg, &value.metadata)
-    }
-}
-impl From<&EmittedEvent> for MetaData {
-    fn from(value: &EmittedEvent) -> Self {
-        MetaData {
-            block_number: value.block_number,
-            transaction_hash: value.transaction_hash,
-            from_address: value.from_address,
-        }
+        (&value.msg, &value.context)
     }
 }
 

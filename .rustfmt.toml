@@ -7,3 +7,5 @@ use_small_heuristics = "Default"
 # Stable options only
 reorder_imports = true
 reorder_modules = true
+
+imports_granularity = "Module"

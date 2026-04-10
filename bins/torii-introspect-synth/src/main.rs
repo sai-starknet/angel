@@ -5,14 +5,12 @@ use dojo_introspect::events::{ModelWithSchemaRegistered, StoreSetRecord, StoreUp
 use dojo_introspect::selector::compute_selector_from_namespace_and_name;
 use dojo_introspect::serde::primitive;
 use dojo_introspect::{DojoIntrospectResult, DojoSchema, DojoSchemaFetcher};
-use introspect_types::utils::{ascii_str_to_felt, string_to_cairo_serialize_byte_array};
+use introspect_types::utils::string_to_cairo_serialize_byte_array;
 use introspect_types::CairoEventInfo;
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use starknet::core::types::EmittedEvent;
-use starknet::core::utils::get_selector_from_name;
-use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
@@ -26,8 +24,9 @@ use torii::etl::sink::{EventBus, Sink, SinkContext};
 use torii::etl::Decoder;
 use torii::grpc::SubscriptionManager;
 use torii_dojo::decoder::DojoDecoder;
-use torii_dojo::store::postgres::PgStore;
-use torii_introspect_postgres_sink::IntrospectPgDb;
+use torii_dojo::store::DojoStoreTrait;
+use torii_introspect_sql_sink::IntrospectPgDb;
+use torii_types::event::StarknetEvent;
 
 const EXTRACTOR_TYPE: &str = "synthetic_introspect";
 const STATE_KEY: &str = "last_block";
@@ -177,20 +176,19 @@ impl SyntheticIntrospectExtractor {
     }
 
     fn score_selector(&self) -> Felt {
-        get_selector_from_name("score").expect("valid selector")
+        Felt::selector("score")
     }
 
-    fn model_registration_event(&self, block_number: u64) -> EmittedEvent {
+    fn model_registration_event(&self, block_number: u64) -> StarknetEvent {
         let mut keys = vec![ModelWithSchemaRegistered::SELECTOR];
         keys.extend(string_to_cairo_serialize_byte_array(MODEL_NAME));
         keys.extend(string_to_cairo_serialize_byte_array(NAMESPACE));
 
-        EmittedEvent {
+        StarknetEvent {
             from_address: FROM_ADDRESS,
             keys,
             data: encode_legacy_schema(),
-            block_hash: Some(block_hash_for(block_number)),
-            block_number: Some(block_number),
+            block_number: block_number,
             transaction_hash: tx_hash_for(block_number, 0),
         }
     }
@@ -221,16 +219,15 @@ impl SyntheticIntrospectExtractor {
         entity_id: Felt,
         owner: Felt,
         initial_score: Felt,
-    ) -> EmittedEvent {
+    ) -> StarknetEvent {
         let mut data = encode_array([owner]);
         data.extend(encode_array([initial_score]));
 
-        EmittedEvent {
+        StarknetEvent {
             from_address: FROM_ADDRESS,
             keys: vec![StoreSetRecord::SELECTOR, self.table_id(), entity_id],
             data,
-            block_hash: Some(block_hash_for(block_number)),
-            block_number: Some(block_number),
+            block_number: block_number,
             transaction_hash: tx_hash_for(block_number, record_tx_index(record_index, false)),
         }
     }
@@ -241,8 +238,8 @@ impl SyntheticIntrospectExtractor {
         record_index: usize,
         entity_id: Felt,
         final_score: Felt,
-    ) -> EmittedEvent {
-        EmittedEvent {
+    ) -> StarknetEvent {
+        StarknetEvent {
             from_address: FROM_ADDRESS,
             keys: vec![
                 StoreUpdateMember::SELECTOR,
@@ -251,8 +248,7 @@ impl SyntheticIntrospectExtractor {
                 self.score_selector(),
             ],
             data: encode_array([final_score]),
-            block_hash: Some(block_hash_for(block_number)),
-            block_number: Some(block_number),
+            block_number: block_number,
             transaction_hash: tx_hash_for(block_number, record_tx_index(record_index, true)),
         }
     }
@@ -418,14 +414,12 @@ async fn main() -> Result<()> {
     fs::create_dir_all(&output_dir)
         .with_context(|| format!("failed to create output dir {}", output_dir.display()))?;
 
-    let pool = Arc::new(
-        PgPoolOptions::new()
-            .max_connections(5)
-            .connect(&config.db_url)
-            .await?,
-    );
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&config.db_url)
+        .await?;
     if config.reset_schema {
-        reset_schema(pool.as_ref()).await?;
+        reset_schema(&pool).await?;
     }
 
     let started = Instant::now();
@@ -447,8 +441,8 @@ async fn main() -> Result<()> {
         .await?,
     );
 
-    let decoder = DojoDecoder::<PgStore<_>, _>::new(pool.clone(), NeverFetchSchema);
-    decoder.store.initialize().await?;
+    let decoder = DojoDecoder::new(pool.clone(), NeverFetchSchema);
+    decoder.initialize().await?;
     decoder.load_tables(&[]).await?;
     let decoder: Arc<dyn Decoder> = Arc::new(decoder);
     let decoder_context =
@@ -476,7 +470,7 @@ async fn main() -> Result<()> {
         }
 
         total_events += batch.events.len();
-        let envelopes = decoder_context.decode(&batch.events).await?;
+        let envelopes = decoder_context.decode_events(&batch.events).await?;
         total_envelopes += envelopes.len();
         sink.process(&envelopes, &batch).await?;
 
@@ -486,7 +480,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let verification = verify_run(pool.as_ref(), &config).await?;
+    let verification = verify_run(&pool, &config).await?;
     let summary = Summary {
         run_id: run_id.clone(),
         duration_ms: started.elapsed().as_millis(),
@@ -563,7 +557,7 @@ async fn verify_run(pool: &PgPool, config: &Config) -> Result<Verification> {
     )
     .bind(
         compute_selector_from_namespace_and_name(NAMESPACE, MODEL_NAME)
-            .to_bytes_be()
+            .to_be_bytes()
             .to_vec(),
     )
     .fetch_one(pool)
@@ -638,7 +632,7 @@ async fn verify_run(pool: &PgPool, config: &Config) -> Result<Verification> {
         WHERE "entity_id" = $1
         "#
     ))
-    .bind(verified_entity_id.to_bytes_be().to_vec())
+    .bind(verified_entity_id.to_be_bytes().to_vec())
     .fetch_one(pool)
     .await?;
 
@@ -657,7 +651,7 @@ async fn verify_run(pool: &PgPool, config: &Config) -> Result<Verification> {
 }
 
 fn encode_legacy_schema() -> Vec<Felt> {
-    let mut schema = vec![ascii_str_to_felt(MODEL_NAME)];
+    let mut schema = vec![Felt::from_short_ascii_str_unchecked(MODEL_NAME)];
     schema.extend(encode_attributes(&[]));
     schema.extend(encode_columns());
     schema
@@ -675,7 +669,7 @@ fn encode_columns() -> Vec<Felt> {
 }
 
 fn encode_column(name: &str, attributes: &[&str], primitive_type: Felt) -> Vec<Felt> {
-    let mut column = vec![ascii_str_to_felt(name)];
+    let mut column = vec![Felt::from_short_ascii_str_unchecked(name)];
     column.extend(encode_attributes(attributes));
     column.extend(vec![Felt::ZERO, primitive_type]);
     column
@@ -686,7 +680,7 @@ fn encode_attributes(attributes: &[&str]) -> Vec<Felt> {
     encoded.extend(
         attributes
             .iter()
-            .map(|attribute| ascii_str_to_felt(attribute)),
+            .map(|attribute| Felt::from_short_ascii_str_unchecked(attribute)),
     );
     encoded
 }

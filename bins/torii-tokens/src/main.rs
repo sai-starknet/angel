@@ -61,7 +61,7 @@ use torii_common::{MetadataFetcher, TokenUriService};
 use torii_config_common::apply_observability_env;
 use torii_runtime_common::database::resolve_token_db_setup;
 #[cfg(feature = "profiling")]
-use torii_runtime_common::database::DatabaseBackend;
+use torii_sql::DbBackend;
 
 // Import from ERC20 library crate
 use torii_erc20::proto::erc20_server::Erc20Server;
@@ -782,7 +782,7 @@ async fn run_indexer(config: Config) -> Result<()> {
                 .duration_since(UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            let db_backend = if db_setup.erc20_backend == DatabaseBackend::Postgres {
+            let db_backend = if db_setup.erc20_backend == DbBackend::Postgres {
                 "postgres"
             } else {
                 "sqlite"

@@ -12,21 +12,17 @@ pub mod proto {
 pub const FILE_DESCRIPTOR_SET: &[u8] = include_bytes!("generated/sql_descriptor.bin");
 
 use async_trait::async_trait;
-use axum::{
-    routing::{get, post},
-    Router,
-};
+use axum::routing::{get, post};
+use axum::Router;
 use prost::Message;
 use prost_types::Any as ProtoAny;
-use sqlx::{any::AnyPoolOptions, Any as SqlxAny, QueryBuilder};
+use sqlx::any::AnyPoolOptions;
+use sqlx::{Any as SqlxAny, QueryBuilder};
+use starknet_types_raw::event::EmittedEvent;
 use std::sync::Arc;
-
-use starknet::core::types::EmittedEvent;
-use torii::etl::{
-    envelope::{Envelope, TypeId},
-    extractor::ExtractionBatch,
-    sink::{EventBus, Sink, TopicInfo},
-};
+use torii::etl::envelope::{Envelope, TypeId};
+use torii::etl::extractor::ExtractionBatch;
+use torii::etl::sink::{EventBus, Sink, TopicInfo};
 use torii::grpc::UpdateType;
 
 pub use decoder::{SqlDecoder, SqlInsert, SqlUpdate};

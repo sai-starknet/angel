@@ -1,32 +1,50 @@
 use itertools::Itertools;
-use sqlx::{postgres::PgPoolOptions, PgPool};
-use std::sync::Arc;
+use starknet::core::types::Felt;
 use torii_dojo::decoder::DojoDecoder;
-use torii_dojo::store::postgres::PgStore;
+use torii_dojo::store::DojoStoreTrait;
 use torii_dojo::DojoToriiError;
-use torii_introspect_postgres_sink::IntrospectPgDb;
-use torii_test_utils::{resolve_path_like, EventIterator, FakeProvider};
+use torii_introspect::events::{IntrospectBody, IntrospectMsg};
+use torii_introspect_sql_sink::IntrospectDb;
+use torii_sql::{DbPool, PoolConfig};
+use torii_test_utils::{resolve_path_like, FakeProvider, MultiContractEventIterator};
 
-const DB_URL: &str = "postgres://torii:torii@localhost:5432/torii";
-// const CHAIN_DATA_PATH: &str = "~/tc-tests/pistols-2";
-// const SCHEMA_NAME: &str = "pistols";
-const CHAIN_DATA_PATH: &str = "~/tc-tests/blob-arena-2";
-const SCHEMA_NAME: &str = "blob_arena";
-const BATCH_SIZE: usize = 10000;
+// const DB_URL: &str = "postgres://torii:torii@localhost:5432/torii";
+const DB_URL: &str = "sqlite://sqlite-data.db?mode=rwc";
+const EVENT_PATHS: [&str; 2] = ["~/tc-tests/blob-arena/events", "~/tc-tests/pistols/events"];
+const MODEL_CONTRACTS_PATH: &str = "~/tc-tests/model-contracts";
+const BATCH_SIZE: usize = 2000;
+const PISTOLS_ADDRESS: Felt =
+    Felt::from_hex_unchecked("08b4838140a3cbd36ebe64d4b5aaf56a30cc3753c928a79338bf56c53f506c5");
+const BLOB_ARENA_ADDRESS: Felt =
+    Felt::from_hex_unchecked("2d26295d6c541d64740e1ae56abc079b82b22c35ab83985ef8bd15dc0f9edfb");
+
+// const SCHEMA_MAP: [(Felt, &str); 2] = [
+//     (PISTOLS_ADDRESS, "pistols"),
+//     (BLOB_ARENA_ADDRESS, "blob_arena"),
+// ];
+
+const ADDRESSES: [Felt; 2] = [PISTOLS_ADDRESS, BLOB_ARENA_ADDRESS];
 
 async fn run_events(
-    events: &mut EventIterator,
+    events: &mut MultiContractEventIterator,
     provider: FakeProvider,
-    pool: Arc<PgPool>,
+    pool: DbPool,
     end: Option<u64>,
     event_n: &mut u32,
     success: &mut u32,
 ) -> bool {
-    let decoder = DojoDecoder::<PgStore<_>, _>::new(pool.clone(), provider);
-    let db = IntrospectPgDb::new(pool.clone(), SCHEMA_NAME);
-    decoder.store.initialize().await.unwrap();
+    println!("Starting event processing run");
+    let decoder = DojoDecoder::new(pool.clone(), provider);
+    let db = IntrospectDb::new(pool, ADDRESSES);
+    decoder.initialize().await.unwrap();
     decoder.load_tables(&[]).await.unwrap();
-    db.initialize_introspect_pg_sink().await.unwrap();
+    let errors = db.initialize_introspect_sql_sink().await.unwrap();
+    if !errors.is_empty() {
+        for err in errors {
+            println!("Error loading table: {err}");
+        }
+        panic!("");
+    }
     let mut running = true;
     let mut this_run = 0;
     while running {
@@ -39,6 +57,13 @@ async fn run_events(
             *event_n += 1;
             this_run += 1;
             match decoder.decode_raw_event(&event).await {
+                Ok(IntrospectBody {
+                    context: metadata,
+                    msg: IntrospectMsg::CreateTable(mut msg),
+                }) => {
+                    msg.append_only = true;
+                    msgs.push((IntrospectMsg::CreateTable(msg), metadata).into());
+                }
                 Ok(msg) => {
                     msgs.push(msg);
                 }
@@ -50,6 +75,7 @@ async fn run_events(
                 }
             };
         }
+
         let msgs_ref = msgs.iter().collect_vec();
         for res in db.process_messages(msgs_ref).await.unwrap() {
             match res {
@@ -72,19 +98,21 @@ async fn run_events(
 
 #[tokio::main]
 async fn main() {
-    let chain_path = resolve_path_like(CHAIN_DATA_PATH);
-    let events_path = chain_path.join("events");
-    let contracts_path = chain_path.join("model-contracts");
-    let provider = FakeProvider::new(contracts_path);
-    let mut event_iterator = EventIterator::new(events_path);
-    let pool = Arc::new(PgPoolOptions::new().connect(DB_URL).await.unwrap());
+    let event_paths = EVENT_PATHS.map(resolve_path_like).to_vec();
+    let provider = FakeProvider::new(resolve_path_like(MODEL_CONTRACTS_PATH));
+    let mut event_iterator = MultiContractEventIterator::new(event_paths);
+    let pool = PoolConfig::new(DB_URL.to_string())
+        .max_connections(5)
+        .connect_any()
+        .await
+        .unwrap();
     let mut event_n = 0;
     let mut success = 0;
     while run_events(
         &mut event_iterator,
         provider.clone(),
         pool.clone(),
-        Some(500000),
+        Some(20000),
         &mut event_n,
         &mut success,
     )

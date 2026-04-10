@@ -11,22 +11,15 @@
 //! - Unmapped contracts with no registry fall back to all decoders
 //! - Deterministic ordering: decoders are always called in sorted DecoderId order
 
+use super::{ContractFilter, Decoder, DecoderId};
+use crate::etl::decoder::EventContext;
+use crate::etl::engine_db::EngineDb;
+use crate::etl::envelope::Envelope;
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-
-use super::{ContractFilter, Decoder, DecoderId};
-use crate::etl::engine_db::EngineDb;
-use crate::etl::envelope::Envelope;
-
-fn event_preview(event: &EmittedEvent) -> String {
-    format!(
-        "contract={:#x} tx={:#x}",
-        event.from_address, event.transaction_hash
-    )
-}
 
 /// DecoderContext manages multiple decoders with contract filtering.
 ///
@@ -215,39 +208,38 @@ impl DecoderContext {
     /// Decode an event using specific decoders
     async fn decode_with_decoders(
         &self,
-        event: &EmittedEvent,
+        keys: &[Felt],
+        data: &[Felt],
+        context: EventContext,
         decoder_ids: &[DecoderId],
     ) -> anyhow::Result<Vec<Envelope>> {
         let mut all_envelopes = Vec::new();
 
         for decoder_id in decoder_ids {
             if let Some(decoder) = self.decoders.get(decoder_id) {
-                match decoder.decode_event(event).await {
+                match decoder.decode(keys, data, context).await {
                     Ok(envelopes) => {
                         if !envelopes.is_empty() {
                             tracing::trace!(
                                 target: "torii::etl::decoder_context",
                                 "Decoder '{}' decoded event from {:#x} into {} envelope(s)",
                                 decoder.decoder_name(),
-                                event.from_address,
+                                context.from_address,
                                 envelopes.len()
                             );
                         }
                         all_envelopes.extend(envelopes);
                     }
                     Err(e) => {
-                        let selector = event
-                            .keys
+                        let selector = keys
                             .first()
                             .map_or_else(|| "<missing>".to_string(), |felt| format!("{felt:#x}"));
-                        let preview = event_preview(event);
                         tracing::warn!(
                             target: "torii::etl::decoder_context",
-                            contract = %format!("{:#x}", event.from_address),
+                            contract = %format!("{:#x}", context.from_address),
                             selector = %selector,
-                            tx_hash = %format!("{:#x}", event.transaction_hash),
-                            block_number = event.block_number,
-                            event = %preview,
+                            tx_hash = %format!("{:#x}", context.transaction_hash),
+                            block_number = context.block_number,
                             "Decoder '{}' failed: {}",
                             decoder.decoder_name(),
                             e
@@ -259,7 +251,7 @@ impl DecoderContext {
                     target: "torii::etl::decoder_context",
                     "Decoder ID {:?} not found for contract {:#x}",
                     decoder_id,
-                    event.from_address
+                    context.from_address
                 );
             }
         }
@@ -270,37 +262,36 @@ impl DecoderContext {
     /// Decode an event using all registered decoders (fallback)
     async fn decode_with_all_decoders(
         &self,
-        event: &EmittedEvent,
+        keys: &[Felt],
+        data: &[Felt],
+        context: EventContext,
     ) -> anyhow::Result<Vec<Envelope>> {
         let mut all_envelopes = Vec::new();
 
         for decoder in self.decoders.values() {
-            match decoder.decode_event(event).await {
+            match decoder.decode(keys, data, context).await {
                 Ok(envelopes) => {
                     if !envelopes.is_empty() {
                         tracing::trace!(
                             target: "torii::etl::decoder_context",
                             "Decoder '{}' decoded event from {:#x} into {} envelope(s)",
                             decoder.decoder_name(),
-                            event.from_address,
+                            context.from_address,
                             envelopes.len()
                         );
                     }
                     all_envelopes.extend(envelopes);
                 }
                 Err(e) => {
-                    let selector = event
-                        .keys
+                    let selector = keys
                         .first()
                         .map_or_else(|| "<missing>".to_string(), |felt| format!("{felt:#x}"));
-                    let preview = event_preview(event);
                     tracing::warn!(
                         target: "torii::etl::decoder_context",
-                        contract = %format!("{:#x}", event.from_address),
+                        contract = %format!("{:#x}", context.from_address),
                         selector = %selector,
-                        tx_hash = %format!("{:#x}", event.transaction_hash),
-                        block_number = event.block_number,
-                        event = %preview,
+                        tx_hash = %format!("{:#x}", context.transaction_hash),
+                        block_number = context.block_number,
                         "Decoder '{}' failed: {}",
                         decoder.decoder_name(),
                         e
@@ -319,21 +310,28 @@ impl Decoder for DecoderContext {
         "context"
     }
 
-    async fn decode_event(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>> {
+    async fn decode(
+        &self,
+        keys: &[Felt],
+        data: &[Felt],
+        context: EventContext,
+    ) -> anyhow::Result<Vec<Envelope>> {
         // 1. Check blacklist first
-        if !self.contract_filter.allows(event.from_address) {
+        if !self.contract_filter.allows(context.from_address) {
             return Ok(Vec::new());
         }
 
         // 2. Check explicit mappings (highest priority)
-        if let Some(decoder_ids) = self.contract_filter.get_decoders(event.from_address) {
-            return self.decode_with_decoders(event, decoder_ids).await;
+        if let Some(decoder_ids) = self.contract_filter.get_decoders(context.from_address) {
+            return self
+                .decode_with_decoders(keys, data, context, decoder_ids)
+                .await;
         }
 
         // 3. Check registry cache (if registry is configured)
         if self.has_registry {
             let cache = self.registry_cache.read().await;
-            if let Some(decoder_ids) = cache.get(&event.from_address) {
+            if let Some(decoder_ids) = cache.get(&context.from_address) {
                 if decoder_ids.is_empty() {
                     // Contract was identified but no decoders match - skip silently
                     return Ok(Vec::new());
@@ -350,55 +348,37 @@ impl Decoder for DecoderContext {
                     drop(cache);
                     {
                         let mut cache = self.registry_cache.write().await;
-                        cache.remove(&event.from_address);
+                        cache.remove(&context.from_address);
                     }
                     tracing::debug!(
                         target: "torii::etl::decoder_context",
-                        contract = %format!("{:#x}", event.from_address),
+                        contract = %format!("{:#x}", context.from_address),
                         invalid_decoder_ids = ?invalid_ids,
                         "Evicted stale decoder mapping from registry cache; falling back to all decoders"
                     );
-                    return self.decode_with_all_decoders(event).await;
+                    return self.decode_with_all_decoders(keys, data, context).await;
                 }
 
                 // Clone to release lock before async decode
                 let decoder_ids = decoder_ids.clone();
                 drop(cache);
-                return self.decode_with_decoders(event, &decoder_ids).await;
+                return self
+                    .decode_with_decoders(keys, data, context, &decoder_ids)
+                    .await;
             }
             // Not in registry cache = not yet identified, try all decoders
             // This enables auto-discovery: decoders can identify events they understand
             tracing::trace!(
                 target: "torii::etl::decoder_context",
-                contract = %format!("{:#x}", event.from_address),
+                contract = %format!("{:#x}", context.from_address),
                 "Contract not in registry cache, trying all decoders"
             );
             drop(cache);
-            return self.decode_with_all_decoders(event).await;
+            return self.decode_with_all_decoders(keys, data, context).await;
         }
 
         // 4. No registry: try all decoders (fallback for non-block-range extractors)
-        self.decode_with_all_decoders(event).await
-    }
-
-    async fn decode(&self, events: &[EmittedEvent]) -> anyhow::Result<Vec<Envelope>> {
-        let mut all_envelopes = Vec::new();
-
-        for event in events {
-            let envelopes = self.decode_event(event).await?;
-
-            all_envelopes.extend(envelopes);
-        }
-
-        tracing::debug!(
-            target: "torii::etl::decoder_context",
-            "Decoded {} events into {} envelopes across {} decoders",
-            events.len(),
-            all_envelopes.len(),
-            self.decoders.len(),
-        );
-
-        Ok(all_envelopes)
+        self.decode_with_all_decoders(keys, data, context).await
     }
 }
 
@@ -439,7 +419,7 @@ mod tests {
             "ordered_decoder"
         }
 
-        async fn decode_event(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>> {
+        async fn decode(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>> {
             if event.from_address != self.contract {
                 return Ok(Vec::new());
             }
@@ -482,7 +462,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
 
-        let envelopes = Decoder::decode(&context, &events).await.unwrap();
+        let envelopes = Decoder::decode_events(&context, &events).await.unwrap();
         let actual = envelopes
             .iter()
             .map(|envelope| envelope.downcast_ref::<TestBody>().unwrap().seq)

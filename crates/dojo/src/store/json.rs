@@ -1,8 +1,9 @@
 use super::DojoStoreTrait;
-use crate::DojoTable;
+use crate::{DojoTable, DojoToriiResult};
 use async_trait::async_trait;
+use introspect_types::ResultInto;
 use serde_json::Error as JsonError;
-use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt;
 use std::fs;
 use std::path::PathBuf;
 use torii_common::json::JsonFs;
@@ -68,19 +69,24 @@ impl JsonStore {
 
 #[async_trait]
 impl DojoStoreTrait for JsonStore {
-    type Error = JsonError;
-
+    async fn initialize(&self) -> DojoToriiResult {
+        // No initialization needed for JSON store, but we can check if the path is accessible.
+        if !self.path.exists() {
+            std::fs::create_dir_all(&self.path).map_err(JsonError::io)?;
+        }
+        Ok(())
+    }
     async fn save_table(
         &self,
-        _owner: &Felt,
+        _owner: Felt,
         table: &DojoTable,
-        _tx_hash: &Felt,
+        _tx_hash: Felt,
         _block_number: u64,
-    ) -> Result<(), Self::Error> {
-        self.dump_table(table)
+    ) -> DojoToriiResult {
+        self.dump_table(table).err_into()
     }
 
-    async fn read_tables(&self, _owners: &[Felt]) -> Result<Vec<DojoTable>, Self::Error> {
-        self.load_all_tables()
+    async fn read_tables(&self, _owners: &[Felt]) -> DojoToriiResult<Vec<DojoTable>> {
+        self.load_all_tables().err_into()
     }
 }

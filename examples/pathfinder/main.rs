@@ -9,7 +9,7 @@ fn main() {
     let mut current_block = 6000000;
     for _ in 0..100 {
         let (blocks, events) = conn
-            .get_emitted_events_with_context(current_block, current_block + BATCH_SIZE - 1)
+            .get_events_with_context(current_block, current_block + BATCH_SIZE - 1)
             .expect("failed to fetch events with context");
         println!(
             "Fetched {} blocks and {} events for blocks {} to {}",

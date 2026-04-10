@@ -1,13 +1,9 @@
 use crate::{connect, EventFetcher, PFResult};
-use anyhow::Result as AnyResult;
-use async_trait::async_trait;
 use rusqlite::Connection;
-use starknet::core::types::EmittedEvent;
-use std::collections::HashMap;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
-use torii::etl::{BlockContext, EngineDb, ExtractionBatch, Extractor};
-
+use std::sync::Mutex;
+use torii_types::block::BlockContext;
+use torii_types::event::StarknetEvent;
 #[derive(Debug)]
 pub struct PathfinderExtractor {
     pub conn: Mutex<Connection>,
@@ -18,7 +14,7 @@ pub struct PathfinderExtractor {
 }
 
 #[derive(Debug)]
-pub struct PathfinderCombinedExtractor<T: Extractor + Send + Sync + 'static> {
+pub struct PathfinderCombinedExtractor<T> {
     pub pathfinder: PathfinderExtractor,
     pub head: T,
     pub on_head: bool,
@@ -35,7 +31,7 @@ impl PathfinderExtractor {
         })
     }
 
-    pub fn next_batch(&mut self) -> PFResult<(Vec<BlockContext>, Vec<EmittedEvent>)> {
+    pub fn next_batch(&mut self) -> PFResult<(Vec<BlockContext>, Vec<StarknetEvent>)> {
         let mut last = self.current + self.batch;
         if last >= self.end {
             last = self.end;
@@ -44,7 +40,7 @@ impl PathfinderExtractor {
         let (blocks, events) = self
             .conn
             .lock()?
-            .get_emitted_events_with_context(self.current, last)?;
+            .get_events_with_context(self.current, last)?;
         let last_block = blocks.last().map_or(self.current, |b| b.number);
         if last_block < last {
             self.finished = true;
@@ -54,7 +50,7 @@ impl PathfinderExtractor {
     }
 }
 
-impl<T: Extractor> PathfinderCombinedExtractor<T> {
+impl<T> PathfinderCombinedExtractor<T> {
     pub fn new<P: AsRef<Path>>(
         path: P,
         batch: u64,
@@ -70,64 +66,74 @@ impl<T: Extractor> PathfinderCombinedExtractor<T> {
     }
 }
 
-#[async_trait]
-impl Extractor for PathfinderExtractor {
-    fn set_start_block(&mut self, start_block: u64) {
-        self.current = start_block.max(self.current);
-    }
-    async fn extract(
-        &mut self,
-        _cursor: Option<String>,
-        _engine_db: &EngineDb,
-    ) -> AnyResult<ExtractionBatch> {
-        let (blocks, events) = self.next_batch()?;
-        let blocks = blocks
-            .into_iter()
-            .map(|b| (b.number, Arc::new(b)))
-            .collect();
-        Ok(ExtractionBatch {
-            events,
-            blocks,
-            transactions: HashMap::new(),
-            declared_classes: Vec::new(),
-            deployed_contracts: Vec::new(),
-            cursor: None,
-            chain_head: None,
-        })
-    }
-    fn is_finished(&self) -> bool {
-        self.current >= self.end
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
+#[cfg(feature = "etl")]
+mod etl {
+    use super::{PathfinderCombinedExtractor, PathfinderExtractor};
+    use anyhow::Result as AnyResult;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use torii::etl::{EngineDb, ExtractionBatch, Extractor};
 
-#[async_trait]
-impl<T: Extractor + Send + Sync + 'static> Extractor for PathfinderCombinedExtractor<T> {
-    fn set_start_block(&mut self, start_block: u64) {
-        self.pathfinder.set_start_block(start_block);
-        self.head.set_start_block(start_block);
-    }
-    async fn extract(
-        &mut self,
-        cursor: Option<String>,
-        engine_db: &EngineDb,
-    ) -> AnyResult<ExtractionBatch> {
-        if self.on_head {
-            self.head.extract(cursor, engine_db).await
-        } else if self.pathfinder.is_finished() {
-            self.on_head = true;
-            self.head.set_start_block(self.pathfinder.current);
-            self.head.extract(cursor, engine_db).await
-        } else {
-            self.pathfinder.extract(cursor, engine_db).await
+    #[async_trait]
+    impl Extractor for PathfinderExtractor {
+        fn set_start_block(&mut self, start_block: u64) {
+            self.current = start_block.max(self.current);
+        }
+        async fn extract(
+            &mut self,
+            _cursor: Option<String>,
+            _engine_db: &EngineDb,
+        ) -> AnyResult<ExtractionBatch> {
+            let (blocks, events) = self.next_batch()?;
+            let blocks = blocks
+                .into_iter()
+                .map(|b| (b.number, Arc::new(b)))
+                .collect();
+            Ok(ExtractionBatch {
+                events,
+                blocks,
+                transactions: HashMap::new(),
+                declared_classes: Vec::new(),
+                deployed_contracts: Vec::new(),
+                cursor: None,
+                chain_head: None,
+            })
+        }
+        fn is_finished(&self) -> bool {
+            self.current >= self.end
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
         }
     }
-    fn is_finished(&self) -> bool {
-        self.pathfinder.is_finished() && self.head.is_finished()
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
+
+    #[async_trait]
+    impl<T: Extractor + Send + Sync + 'static> Extractor for PathfinderCombinedExtractor<T> {
+        fn set_start_block(&mut self, start_block: u64) {
+            self.pathfinder.set_start_block(start_block);
+            self.head.set_start_block(start_block);
+        }
+        async fn extract(
+            &mut self,
+            cursor: Option<String>,
+            engine_db: &EngineDb,
+        ) -> AnyResult<ExtractionBatch> {
+            if self.on_head {
+                self.head.extract(cursor, engine_db).await
+            } else if self.pathfinder.is_finished() {
+                self.on_head = true;
+                self.head.set_start_block(self.pathfinder.current);
+                self.head.extract(cursor, engine_db).await
+            } else {
+                self.pathfinder.extract(cursor, engine_db).await
+            }
+        }
+        fn is_finished(&self) -> bool {
+            self.pathfinder.is_finished() && self.head.is_finished()
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
     }
 }

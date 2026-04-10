@@ -5,12 +5,11 @@
 //! SampleExtractor to generate test data.
 //! The decoder is where the events are decoded into envelopes based on the event content.
 
-use starknet::core::types::{EmittedEvent, Felt};
-use starknet::core::utils::cairo_short_string_to_felt;
-use starknet::macros::{felt, selector};
+use starknet_types_raw::event::EmittedEvent;
+use starknet_types_raw::Felt;
 
 const DUMMY_CONTRACT_ADDRESS: Felt =
-    felt!("0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
+    Felt::from_hex_unchecked("0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");
 
 /// Generate sample events for testing the SQL sink
 ///
@@ -27,8 +26,8 @@ pub fn generate_sample_events() -> Vec<EmittedEvent> {
         EmittedEvent {
             from_address: DUMMY_CONTRACT_ADDRESS,
             keys: vec![
-                selector!("insert"),
-                cairo_short_string_to_felt("user").unwrap(),
+                Felt::selector("insert"),
+                Felt::from_short_ascii_str_unchecked("user"),
             ],
             data: vec![Felt::from(100u64)],
             block_hash: None,
@@ -38,8 +37,8 @@ pub fn generate_sample_events() -> Vec<EmittedEvent> {
         EmittedEvent {
             from_address: DUMMY_CONTRACT_ADDRESS,
             keys: vec![
-                selector!("update"),
-                cairo_short_string_to_felt("user").unwrap(),
+                Felt::selector("update"),
+                Felt::from_short_ascii_str_unchecked("user"),
             ],
             data: vec![Felt::from(200u64)],
             block_hash: None,
@@ -49,8 +48,8 @@ pub fn generate_sample_events() -> Vec<EmittedEvent> {
         EmittedEvent {
             from_address: DUMMY_CONTRACT_ADDRESS,
             keys: vec![
-                selector!("insert"),
-                cairo_short_string_to_felt("order").unwrap(),
+                Felt::selector("insert"),
+                Felt::from_short_ascii_str_unchecked("order"),
             ],
             data: vec![Felt::from(150u64)],
             block_hash: None,
@@ -60,8 +59,8 @@ pub fn generate_sample_events() -> Vec<EmittedEvent> {
         EmittedEvent {
             from_address: DUMMY_CONTRACT_ADDRESS,
             keys: vec![
-                selector!("update"),
-                cairo_short_string_to_felt("order").unwrap(),
+                Felt::selector("update"),
+                Felt::from_short_ascii_str_unchecked("order"),
             ],
             data: vec![Felt::from(300u64)],
             block_hash: None,

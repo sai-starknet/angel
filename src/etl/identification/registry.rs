@@ -10,19 +10,19 @@ use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 const MAX_BATCH_SIZE: usize = 500;
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures::stream::{self, StreamExt};
-use starknet::core::types::requests::{GetClassHashAtRequest, GetClassRequest};
-use starknet::core::types::{BlockId, BlockTag, Felt};
-use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
-use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use tokio::sync::RwLock;
-
 use super::IdentificationRule;
 use crate::etl::decoder::DecoderId;
 use crate::etl::engine_db::EngineDb;
 use crate::etl::extractor::ContractAbi;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use futures::stream::{self, StreamExt};
+use starknet::core::types::requests::{GetClassHashAtRequest, GetClassRequest};
+use starknet::core::types::{BlockId, BlockTag};
+use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
+use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
+use tokio::sync::RwLock;
 
 /// Trait for contract identification (object-safe).
 ///
@@ -297,7 +297,7 @@ impl ContractRegistry {
                     .map(|&addr| {
                         ProviderRequestData::GetClassHashAt(GetClassHashAtRequest {
                             block_id: BlockId::Tag(BlockTag::Latest),
-                            contract_address: addr,
+                            contract_address: addr.into(),
                         })
                     })
                     .collect();
@@ -332,7 +332,7 @@ impl ContractRegistry {
             // Map contract → class_hash, track failures
             for (addr, response) in chunk_addresses.iter().zip(class_hash_responses) {
                 if let ProviderResponseData::GetClassHashAt(class_hash) = response {
-                    contract_to_class.insert(*addr, class_hash);
+                    contract_to_class.insert(*addr, class_hash.into());
                 } else {
                     tracing::debug!(
                         target: "torii::etl::identification",
@@ -375,7 +375,7 @@ impl ContractRegistry {
                     .map(|&class_hash| {
                         ProviderRequestData::GetClass(GetClassRequest {
                             block_id: BlockId::Tag(BlockTag::Latest),
-                            class_hash,
+                            class_hash: class_hash.into(),
                         })
                     })
                     .collect();

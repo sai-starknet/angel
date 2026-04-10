@@ -3,11 +3,10 @@ mod config;
 use anyhow::{Error, Result};
 use clap::Parser;
 use config::{Config, MetadataMode};
-use sqlx::postgres::PgPoolOptions;
-use sqlx::sqlite::SqlitePoolOptions;
 use starknet::core::types::Felt;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tonic::codec::CompressionEncoding;
@@ -18,8 +17,7 @@ use torii::etl::extractor::{
     ContractEventConfig, EventExtractor, EventExtractorConfig, Extractor, RetryPolicy,
 };
 use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
-use torii::etl::EngineDb;
-use torii::etl::TypeId;
+use torii::etl::{EngineDb, TypeId};
 use torii::EtlConcurrencyConfig;
 use torii_arcade_sink::proto::arcade::arcade_server::ArcadeServer;
 use torii_arcade_sink::{ArcadeSink, FILE_DESCRIPTOR_SET as ARCADE_DESCRIPTOR_SET};
@@ -30,11 +28,9 @@ use torii_dojo::external_contract::{
     contract_type_from_decoder_ids, RegisterExternalContractCommandHandler, RegisteredContractType,
     SharedContractTypeRegistry, SharedDecoderRegistry,
 };
-use torii_dojo::store::postgres::PgStore;
-use torii_dojo::store::sqlite::SqliteStore;
+use torii_dojo::store::DojoStoreTrait;
 use torii_ecs_sink::proto::world::world_server::WorldServer;
 use torii_ecs_sink::{EcsSink, FILE_DESCRIPTOR_SET as ECS_DESCRIPTOR_SET};
-use torii_entities_historical_sink::EntitiesHistoricalSink;
 use torii_erc1155::proto::erc1155_server::Erc1155Server;
 use torii_erc1155::{
     Erc1155Decoder, Erc1155MetadataCommandHandler, Erc1155Service, Erc1155Sink, Erc1155Storage,
@@ -50,14 +46,11 @@ use torii_erc721::{
     Erc721Decoder, Erc721MetadataCommandHandler, Erc721Service, Erc721Sink, Erc721Storage,
     FILE_DESCRIPTOR_SET as ERC721_DESCRIPTOR_SET,
 };
-use torii_introspect_postgres_sink::processor::IntrospectPgDb;
-use torii_introspect_sqlite_sink::processor::IntrospectSqliteDb;
+use torii_introspect_sql_sink::{IntrospectDb, NamespaceMode};
 use torii_pathfinder::extractor::PathfinderCombinedExtractor;
-use torii_runtime_common::database::{
-    validate_uniform_backends, DatabaseBackend, DEFAULT_SQLITE_MAX_CONNECTIONS,
-};
+use torii_runtime_common::database::{validate_uniform_backends, DEFAULT_SQLITE_MAX_CONNECTIONS};
 use torii_runtime_common::token_support::{resolve_installed_token_support, InstalledTokenSupport};
-use torii_sqlite::{is_sqlite_memory_path, sqlite_connect_options};
+use torii_sql::{DbConnectionOptions, DbPool, DbPoolOptions, PoolExt};
 
 type StarknetProvider =
     starknet::providers::jsonrpc::JsonRpcClient<starknet::providers::jsonrpc::HttpTransport>;
@@ -257,7 +250,7 @@ async fn run_indexer(config: Config) -> Result<()> {
             ("erc1155", &erc1155_db_url),
         ],
         "torii-arcade does not support mixed storage backends in one runtime; configure all databases as either SQLite or PostgreSQL",
-    )?;
+    ).map_err(|err| anyhow::anyhow!(err))?;
 
     let provider = starknet::providers::jsonrpc::JsonRpcClient::new(
         starknet::providers::jsonrpc::HttpTransport::new(
@@ -394,64 +387,32 @@ async fn run_indexer(config: Config) -> Result<()> {
         &erc1155_addresses,
         &config,
     )?;
-
-    let (dojo_decoder, introspect_sink): (
-        Arc<dyn torii::etl::Decoder>,
-        Box<dyn torii::etl::sink::Sink>,
-    ) = match backend {
-        DatabaseBackend::Postgres => {
-            let max_db_connections = config.max_db_connections.unwrap_or(5);
-            let pool = Arc::new(
-                PgPoolOptions::new()
-                    .max_connections(max_db_connections)
-                    .connect(&storage_database_url)
-                    .await?,
-            );
-
-            let decoder = DojoDecoder::<PgStore<_>, _>::new(pool.clone(), (*provider).clone());
-            let sink = IntrospectPgDb::new(pool.clone(), ());
-            decoder.store.initialize().await?;
-            decoder.load_tables(&[]).await?;
-
-            (
-                Arc::new(decoder) as Arc<dyn torii::etl::Decoder>,
-                Box::new(sink),
-            )
-        }
-        DatabaseBackend::Sqlite => {
-            let options = sqlite_connect_options(&storage_database_url)?;
-            let max_db_connections = match config.max_db_connections {
-                Some(limit) => limit.max(1),
-                None if is_sqlite_memory_path(&storage_database_url) => 1,
-                None => DEFAULT_SQLITE_MAX_CONNECTIONS,
-            };
-            let pool = Arc::new(
-                SqlitePoolOptions::new()
-                    .max_connections(max_db_connections)
-                    .connect_with(options)
-                    .await?,
-            );
-
-            sqlx::query("PRAGMA journal_mode=WAL")
-                .execute(pool.as_ref())
-                .await?;
-            sqlx::query("PRAGMA synchronous=NORMAL")
-                .execute(pool.as_ref())
-                .await?;
-            sqlx::query("PRAGMA foreign_keys=ON")
-                .execute(pool.as_ref())
-                .await?;
-
-            let decoder = DojoDecoder::<SqliteStore<_>, _>::new(pool.clone(), (*provider).clone());
-            decoder.store.initialize().await?;
-            decoder.load_tables(&[]).await?;
-
-            (
-                Arc::new(decoder) as Arc<dyn torii::etl::Decoder>,
-                Box::new(IntrospectSqliteDb::new(pool.clone(), ())),
-            )
-        }
+    let conn_options =
+        DbConnectionOptions::from_str(&engine_database_url).map_err(anyhow::Error::msg)?;
+    let max_connections = match config.max_db_connections {
+        Some(n) => n,
+        None => match &conn_options {
+            DbConnectionOptions::Postgres(_) => 10,
+            DbConnectionOptions::Sqlite(ops) if ops.is_in_memory() => 1,
+            DbConnectionOptions::Sqlite(_) => DEFAULT_SQLITE_MAX_CONNECTIONS,
+        },
     };
+    let pool_options = DbPoolOptions::new().max_connections(max_connections);
+    let pool = pool_options.connect_any_with(conn_options).await?;
+    if let DbPool::Sqlite(pool) = &pool {
+        pool.execute_queries([
+            "PRAGMA journal_mode=WAL",
+            "PRAGMA synchronous=NORMAL",
+            "PRAGMA foreign_keys=ON",
+        ])
+        .await?;
+    }
+    let dojo_decoder = DojoDecoder::new(pool.clone(), provider.clone());
+    let introspect_sink = IntrospectDb::new(pool, NamespaceMode::Address);
+
+    dojo_decoder.initialize().await?;
+    dojo_decoder.load_tables(&[]).await?;
+    introspect_sink.initialize_introspect_sql_sink().await?;
 
     let ecs_sink = EcsSink::new(
         &storage_database_url,
@@ -479,20 +440,8 @@ async fn run_indexer(config: Config) -> Result<()> {
         .register_encoded_file_descriptor_set(ECS_DESCRIPTOR_SET)
         .register_encoded_file_descriptor_set(ARCADE_DESCRIPTOR_SET);
 
-    let historical_sink = Box::new(
-        EntitiesHistoricalSink::new(
-            &storage_database_url,
-            config.max_db_connections,
-            (),
-            historical_models,
-        )
-        .await?,
-    );
-    let arcade_projection_pipeline = ArcadeProjectionPipeline::new(vec![
-        introspect_sink,
-        historical_sink,
-        Box::new(arcade_sink),
-    ]);
+    let arcade_projection_pipeline =
+        ArcadeProjectionPipeline::new(vec![Box::new(introspect_sink), Box::new(arcade_sink)]);
 
     let mut torii_config = torii::ToriiConfig::builder()
         .port(config.port)
@@ -504,7 +453,7 @@ async fn run_indexer(config: Config) -> Result<()> {
         })
         .engine_database_url(engine_database_url)
         .with_extractor(extractor)
-        .add_decoder(dojo_decoder)
+        .add_decoder(Arc::new(dojo_decoder))
         .add_sink_boxed(Box::new(ecs_sink))
         .add_sink_boxed(Box::new(arcade_projection_pipeline));
 

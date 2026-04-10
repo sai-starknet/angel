@@ -1,21 +1,20 @@
 use super::DojoStoreTrait;
 use crate::decoder::primary_field_def;
-use crate::DojoTable;
+use crate::{DojoTable, DojoToriiError, DojoToriiResult};
 use async_trait::async_trait;
 use introspect_types::ColumnInfo;
 use serde::{Deserialize, Serialize};
 use sqlx::migrate::Migrator;
 use sqlx::sqlite::SqliteArguments;
-use sqlx::Arguments;
-use sqlx::{FromRow, Sqlite};
-use starknet_types_core::felt::Felt;
+use sqlx::{Arguments, FromRow, Sqlite, SqlitePool};
+use starknet_types_raw::error::OverflowError;
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::io;
 use std::ops::Deref;
-use torii_common::sql::SqlxResult;
-use torii_common::{blob_to_felt, felt_to_blob};
 use torii_introspect::schema::ColumnKeyTrait;
-use torii_sqlite::SqliteConnection;
+use torii_sql::sqlite::SqliteDbConnection;
+use torii_sql::{PoolExt, SqlxResult};
 
 pub const DOJO_SQLITE_STORE_MIGRATIONS: Migrator = sqlx::migrate!("./migrations/sqlite");
 
@@ -31,6 +30,8 @@ pub enum DojoSqliteStoreError {
         table_id: Felt,
         column_id: Felt,
     },
+    #[error("Felt overflow error: {0}")]
+    FeltOverflow(#[from] OverflowError),
 }
 
 impl DojoSqliteStoreError {
@@ -90,7 +91,7 @@ fn parse_felt_json_array(value: &str) -> Result<Vec<Felt>, DojoSqliteStoreError>
 
 fn table_row_into_table(value: TableRow) -> Result<DojoTable, DojoSqliteStoreError> {
     Ok(DojoTable {
-        id: blob_to_felt(&value.id),
+        id: Felt::from_be_bytes_slice(&value.id)?,
         name: value.name,
         attributes: serde_json::from_str(&value.attributes)?,
         primary: primary_field_def(),
@@ -107,7 +108,10 @@ where
 {
     let payload: StoredColumnInfo = serde_json::from_str(&value.payload)?;
     Ok((
-        K::from_parts(blob_to_felt(&value.table_id), blob_to_felt(&value.id)),
+        K::from_parts(
+            Felt::from_be_bytes_slice(&value.table_id)?,
+            Felt::from_be_bytes_slice(&value.id)?,
+        ),
         ColumnInfo {
             name: payload.name,
             attributes: payload.attributes,
@@ -116,7 +120,7 @@ where
     ))
 }
 
-fn select_table_query<'a>(owners: &[Felt]) -> (String, SqliteArguments<'a>) {
+fn select_table_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) {
     let mut query = String::from(
         "SELECT id, name, attributes, keys_json, values_json, legacy FROM dojo_tables",
     );
@@ -128,14 +132,14 @@ fn select_table_query<'a>(owners: &[Felt]) -> (String, SqliteArguments<'a>) {
                 query.push_str(", ");
             }
             query.push('?');
-            let _ = args.add(felt_to_blob(*owner));
+            let _ = args.add(owner.as_be_bytes_slice());
         }
         query.push(')');
     }
     (query, args)
 }
 
-fn select_column_query<'a>(owners: &[Felt]) -> (String, SqliteArguments<'a>) {
+fn select_column_query<'a>(owners: &'a [Felt]) -> (String, SqliteArguments<'a>) {
     let mut query = String::from("SELECT table_id, id, payload FROM dojo_columns");
     let mut args = SqliteArguments::default();
     if !owners.is_empty() {
@@ -145,7 +149,7 @@ fn select_column_query<'a>(owners: &[Felt]) -> (String, SqliteArguments<'a>) {
                 query.push_str(", ");
             }
             query.push('?');
-            let _ = args.add(felt_to_blob(*owner));
+            let _ = args.add(owner.as_be_bytes_slice());
         }
         query.push(')');
     }
@@ -162,31 +166,34 @@ impl<T> Deref for SqliteStore<T> {
     }
 }
 
-impl<T: SqliteConnection + Send + Sync> SqliteStore<T> {
+impl<T: SqliteDbConnection + Send + Sync> SqliteStore<T> {
     pub async fn initialize(&self) -> SqlxResult<()> {
         self.migrate(Some("dojo"), DOJO_SQLITE_STORE_MIGRATIONS)
             .await
     }
 }
 
-impl<T: SqliteConnection> From<T> for SqliteStore<T> {
+impl<T: SqliteDbConnection> From<T> for SqliteStore<T> {
     fn from(pool: T) -> Self {
         Self(pool)
     }
 }
 
 #[async_trait]
-impl<T: SqliteConnection + Send + Sync + 'static> DojoStoreTrait for SqliteStore<T> {
-    type Error = DojoSqliteStoreError;
-
+impl DojoStoreTrait for SqlitePool {
+    async fn initialize(&self) -> DojoToriiResult {
+        self.migrate(Some("dojo"), DOJO_SQLITE_STORE_MIGRATIONS)
+            .await
+            .map_err(DojoToriiError::store_error)
+    }
     async fn save_table(
         &self,
-        owner: &Felt,
+        owner: Felt,
         table: &DojoTable,
-        tx_hash: &Felt,
+        tx_hash: Felt,
         block_number: u64,
-    ) -> Result<(), Self::Error> {
-        let mut transaction = self.begin().await?;
+    ) -> DojoToriiResult {
+        let mut transaction = self.begin().await.map_err(DojoToriiError::store_error)?;
 
         sqlx::query(
             r"
@@ -215,8 +222,8 @@ impl<T: SqliteConnection + Send + Sync + 'static> DojoStoreTrait for SqliteStore
                 updated_tx = excluded.updated_tx
             ",
         )
-        .bind(felt_to_blob(*owner))
-        .bind(felt_to_blob(table.id))
+        .bind(owner.as_be_bytes_slice())
+        .bind(table.id.as_be_bytes_slice())
         .bind(&table.name)
         .bind(serde_json::to_string(&table.attributes)?)
         .bind(serialize_felt_json_array(&table.key_fields)?)
@@ -224,10 +231,11 @@ impl<T: SqliteConnection + Send + Sync + 'static> DojoStoreTrait for SqliteStore
         .bind(table.legacy)
         .bind(block_number as i64)
         .bind(block_number as i64)
-        .bind(felt_to_blob(*tx_hash))
-        .bind(felt_to_blob(*tx_hash))
+        .bind(tx_hash.as_be_bytes_slice())
+        .bind(tx_hash.as_be_bytes_slice())
         .execute(&mut *transaction)
-        .await?;
+        .await
+        .map_err(DojoToriiError::store_error)?;
 
         for (id, info) in &table.columns {
             let payload = StoredColumnInfo {
@@ -243,42 +251,50 @@ impl<T: SqliteConnection + Send + Sync + 'static> DojoStoreTrait for SqliteStore
                     payload = excluded.payload
                 ",
             )
-            .bind(felt_to_blob(*owner))
-            .bind(felt_to_blob(table.id))
-            .bind(felt_to_blob(*id))
+            .bind(owner.as_be_bytes_slice())
+            .bind(table.id.as_be_bytes_slice())
+            .bind(id.as_be_bytes_slice())
             .bind(serde_json::to_string(&payload)?)
             .execute(&mut *transaction)
-            .await?;
+            .await
+            .map_err(DojoToriiError::store_error)?;
         }
 
-        transaction.commit().await?;
+        transaction
+            .commit()
+            .await
+            .map_err(DojoToriiError::store_error)?;
         Ok(())
     }
 
-    async fn read_tables(&self, owners: &[Felt]) -> Result<Vec<DojoTable>, Self::Error> {
+    async fn read_tables(&self, owners: &[Felt]) -> DojoToriiResult<Vec<DojoTable>> {
         let (table_query, table_args) = select_table_query(owners);
         let rows = sqlx::query_as_with::<Sqlite, TableRow, _>(&table_query, table_args)
             .fetch_all(self.pool())
-            .await?;
+            .await
+            .map_err(DojoToriiError::store_error)?;
         let mut tables = rows
             .into_iter()
             .map(table_row_into_table)
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DojoToriiError::store_error)?;
 
         let (column_query, column_args) = select_column_query(owners);
         let mut columns: HashMap<(Felt, Felt), ColumnInfo> =
             sqlx::query_as_with::<Sqlite, ColumnRow, _>(&column_query, column_args)
                 .fetch_all(self.pool())
-                .await?
+                .await
+                .map_err(DojoToriiError::store_error)?
                 .into_iter()
                 .map(column_row_into_entry::<(Felt, Felt)>)
-                .collect::<Result<HashMap<_, _>, _>>()?;
+                .collect::<Result<HashMap<_, _>, _>>()
+                .map_err(DojoToriiError::store_error)?;
 
         for table in &mut tables {
             for key in table.key_fields.iter().chain(table.value_fields.iter()) {
-                let column = columns.remove(&(table.id, *key)).ok_or_else(|| {
-                    DojoSqliteStoreError::column_not_found(table.name.clone(), &(table.id, *key))
-                })?;
+                let column = columns
+                    .remove(&(table.id, *key))
+                    .ok_or_else(|| DojoToriiError::ColumnNotFound(table.name.clone(), *key))?;
                 table.columns.insert(*key, column);
             }
         }

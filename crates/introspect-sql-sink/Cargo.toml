@@ -1,0 +1,37 @@
+[package]
+name = "torii-introspect-sql-sink"
+version = "0.1.0"
+edition = "2021"
+description = "Database sink implementation for Torii runtime"
+authors = ["Torii Runtime <dev@torii.rs>"]
+license = "Apache-2.0"
+
+[dependencies]
+sqlx = { workspace = true, features = ["runtime-tokio-rustls", "macros"] }
+anyhow.workspace = true
+async-trait.workspace = true
+metrics.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# starknet-types-core.workspace = true
+starknet-types-raw.workspace = true
+tokio.workspace = true
+torii.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+introspect-types.workspace = true
+itertools.workspace = true
+primitive-types.workspace = true
+
+# Local crates
+torii-introspect.workspace = true
+torii-sql.workspace = true
+
+# Postgres features
+xxhash-rust = { workspace = true, optional = true }
+
+
+[features]
+postgres = ["sqlx/postgres", "dep:xxhash-rust", "torii-sql/postgres"]
+sqlite = ["sqlx/sqlite", "torii-sql/sqlite"]

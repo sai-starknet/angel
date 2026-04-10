@@ -304,7 +304,7 @@ async fn main() -> Result<()> {
         }
 
         let decode_start = Instant::now();
-        let envelopes = decoder_context.decode(&batch.events).await?;
+        let envelopes = decoder_context.decode_events(&batch.events).await?;
         let decode_ms = ms(decode_start.elapsed());
 
         let sink_start = Instant::now();

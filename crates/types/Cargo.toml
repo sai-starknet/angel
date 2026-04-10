@@ -1,0 +1,16 @@
+[package]
+name = "torii-types"
+version = "0.1.0"
+edition = "2021"
+description = "Common types for Torii"
+
+[dependencies]
+thiserror.workspace = true
+starknet-types-raw = { workspace = true, features = ["serde"] }
+starknet = { workspace = true, optional = true }
+
+[lints]
+workspace = true
+
+[features]
+field = ["dep:starknet"]

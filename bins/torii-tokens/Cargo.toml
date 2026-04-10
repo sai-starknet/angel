@@ -10,13 +10,14 @@ path = "src/main.rs"
 
 [dependencies]
 # Core dependencies
-torii = { path = "../../" }
-torii-common = { path = "../../crates/torii-common" }
+torii.workspace = true
+torii-common.workspace = true
 torii-config-common.workspace = true
 torii-runtime-common.workspace = true
-torii-erc20 = { path = "../../crates/torii-erc20" }
-torii-erc721 = { path = "../../crates/torii-erc721" }
-torii-erc1155 = { path = "../../crates/torii-erc1155" }
+torii-erc20.workspace = true
+torii-erc721.workspace = true
+torii-erc1155.workspace = true
+torii-sql = { workspace = true, optional = true }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -47,7 +48,7 @@ features = ["flamegraph", "prost-codec"]
 optional = true
 
 [features]
-profiling = ["pprof"]
+profiling = ["pprof", "torii-sql"]
 
 [lints]
 workspace = true

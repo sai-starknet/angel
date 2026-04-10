@@ -1,11 +1,12 @@
 pub mod context;
 
-use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
-use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
-use std::hash::{Hash, Hasher};
-
 use super::envelope::Envelope;
+use async_trait::async_trait;
+use starknet_types_raw::Felt;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
+use torii_types::event::{EventContext, StarknetEvent};
+use xxhash_rust::const_xxh3::xxh3_64;
 
 pub use context::DecoderContext;
 
@@ -43,16 +44,17 @@ pub use context::DecoderContext;
 /// ```rust,ignore
 /// use crate::etl::decoder::Decoder;
 /// use crate::etl::envelope::{Envelope, TypeId, TypedBody};
-/// use starknet::core::types::EmittedEvent;
+/// use crate::etl::decoder::StarknetEvent;
 /// use async_trait::async_trait;
 /// use std::collections::HashMap;
+/// use starknet_types_raw::Felt;
 ///
 /// pub struct MyDecoder {
-///     contract_filters: Vec<starknet::core::types::Felt>,
+///     contract_filters: Vec<Felt>,
 /// }
 ///
 /// impl MyDecoder {
-///     fn is_interested(&self, event: &EmittedEvent) -> bool {
+///     fn is_interested(&self, event: &StarknetEvent) -> bool {
 ///         // Filter logic here
 ///         true
 ///     }
@@ -64,7 +66,7 @@ pub use context::DecoderContext;
 ///         "my_decoder"
 ///     }
 ///
-///     async fn decode_event(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>> {
+///     async fn decode_event(&self, event: &StarknetEvent) -> anyhow::Result<Vec<Envelope>> {
 ///         if !self.is_interested(event) {
 ///             return Ok(Vec::new());
 ///         }
@@ -86,7 +88,7 @@ pub use context::DecoderContext;
 ///
 /// # Performance
 ///
-/// **Zero-copy filtering**: Decoders receive `&EmittedEvent` (reference), allowing:
+/// **Zero-copy filtering**: Decoders receive `&StarknetEvent` (reference), allowing:
 /// - Process events without cloning.
 /// - Only extract data for events the decoder is interested in.
 /// - Multiple decoders process the same events without memory duplication.
@@ -109,17 +111,39 @@ pub trait Decoder: Send + Sync {
     /// ```
     fn decoder_name(&self) -> &str;
 
-    /// Decode a single event into typed envelopes
+    /// Decode event data into typed envelopes
     ///
     /// This is the primary method that decoders should implement.
     /// Returns an empty Vec if the decoder is not interested in this event.
+    ///
+    /// # Arguments
+    /// * `keys` - Event keys (selectors and other identifiers).
+    /// * `data` - Event data fields.
+    /// * `context` -  from_address, block_number, transaction_hash
+    ///
+    /// # Returns
+    /// Vector of envelopes produced from this event (empty if not interested).
+    async fn decode(
+        &self,
+        keys: &[Felt],
+        data: &[Felt],
+        context: EventContext,
+    ) -> anyhow::Result<Vec<Envelope>>;
+
+    /// Decode a single event into envelopes (convenience method)
+    ///
+    /// Default implementation calls `decode()` with event fields.
+    /// Override only if you want to change the input type or add pre-processing.
     ///
     /// # Arguments
     /// * `event` - Reference to the event to decode.
     ///
     /// # Returns
     /// Vector of envelopes produced from this event (empty if not interested).
-    async fn decode_event(&self, event: &EmittedEvent) -> anyhow::Result<Vec<Envelope>>;
+
+    async fn decode_event(&self, event: &StarknetEvent) -> anyhow::Result<Vec<Envelope>> {
+        self.decode(&event.keys, &event.data, event.context()).await
+    }
 
     /// Decode multiple events into typed envelopes (convenience method)
     ///
@@ -131,11 +155,10 @@ pub trait Decoder: Send + Sync {
     ///
     /// # Returns
     /// Vector of all envelopes produced from all events.
-    async fn decode(&self, events: &[EmittedEvent]) -> anyhow::Result<Vec<Envelope>> {
+    async fn decode_events(&self, events: &[StarknetEvent]) -> anyhow::Result<Vec<Envelope>> {
         let mut all_envelopes = Vec::new();
         for event in events {
-            let envelopes = self.decode_event(event).await?;
-            all_envelopes.extend(envelopes);
+            all_envelopes.extend(self.decode_event(event).await?);
         }
         Ok(all_envelopes)
     }
@@ -150,18 +173,16 @@ pub trait Decoder: Send + Sync {
 /// # Example
 ///
 /// ```rust,ignore
-/// let erc20_decoder_id = DecoderId::new("erc20");
-/// let erc721_decoder_id = DecoderId::new("erc721");
+/// const ERC20_DECODER_ID = DecoderId::new("erc20");
+/// const ERC721_DECODER_ID = DecoderId::new("erc721");
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct DecoderId(u64);
 
 impl DecoderId {
     /// Creates a DecoderId from a decoder name (deterministic)
-    pub fn new(name: &str) -> Self {
-        let mut hasher = DefaultHasher::new();
-        name.hash(&mut hasher);
-        DecoderId(hasher.finish())
+    pub const fn new(type_name: &str) -> Self {
+        Self(xxh3_64(type_name.as_bytes()))
     }
 
     /// Creates a DecoderId from a u64 value (for deserialization)

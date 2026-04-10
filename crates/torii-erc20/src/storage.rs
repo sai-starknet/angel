@@ -10,19 +10,19 @@
 //! - Records all adjustments in an audit table for debugging
 
 use anyhow::Result;
+use primitive_types::U256;
 use rusqlite::{params, params_from_iter, Connection, ToSql};
-use starknet::core::types::{Felt, U256};
+use starknet_types_raw::Felt;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio_postgres::types::ToSql as PgToSql;
 use tokio_postgres::{Client, NoTls};
-use torii_common::{blob_to_felt, blob_to_u256, felt_to_blob, u256_to_blob};
+use torii_common::{blob_to_u256, u256_to_blob};
 
 use crate::balance_fetcher::BalanceFetchRequest;
 
 /// Maximum value for U256 (2^256 - 1)
-const U256_MAX: U256 = U256::from_words(u128::MAX, u128::MAX);
 const SQLITE_MAX_BIND_VARS: usize = 900;
 const SQLITE_TOKEN_WALLET_QUERY_CHUNK: usize = SQLITE_MAX_BIND_VARS - 1;
 const SQLITE_ACTIVITY_INSERT_CHUNK: usize = SQLITE_MAX_BIND_VARS / 5;
@@ -146,15 +146,15 @@ struct AdjustmentInsertRow {
 /// - Accumulation of many transfers to the same address
 fn safe_u256_add(a: U256, b: U256) -> U256 {
     // Check if addition would overflow
-    // If a > U256_MAX - b, then a + b would overflow
-    let max_minus_b = U256_MAX - b;
+    // If a > U256::MAX - b, then a + b would overflow
+    let max_minus_b = U256::MAX - b;
     if a > max_minus_b {
         tracing::warn!(
             "U256 addition overflow detected: {} + {} would exceed U256::MAX, capping at maximum",
             a,
             b
         );
-        U256_MAX
+        U256::MAX
     } else {
         a + b
     }
@@ -170,21 +170,6 @@ pub enum TransferDirection {
     Sent,
     /// Only received transfers (wallet is receiver)
     Received,
-}
-
-/// Storage for ERC20 transfers and approvals
-pub struct Erc20Storage {
-    backend: StorageBackend,
-    conn: Arc<Mutex<Connection>>,
-    balance_cache: Arc<Mutex<BalanceCacheState>>,
-    pg_conns: Option<Vec<Arc<tokio::sync::Mutex<Client>>>>,
-    pg_rr: AtomicUsize,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum StorageBackend {
-    Sqlite,
-    Postgres,
 }
 
 /// Transfer data for batch insertion

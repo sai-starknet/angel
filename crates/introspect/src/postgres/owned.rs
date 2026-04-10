@@ -8,9 +8,9 @@ use sqlx::postgres::{PgArguments, PgRow};
 use sqlx::query::Query;
 use sqlx::types::Json;
 use sqlx::{FromRow, PgPool, Postgres};
-use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
-use torii_common::sql::SqlxResult;
+use torii_sql::SqlxResult;
 
 pub const TABLE_INSERT_QUERY: &str = "
     INSERT INTO introspect.tables (owner, id, name, attributes, primary_def, column_ids, updated_at, created_block, updated_block, created_tx, updated_tx)

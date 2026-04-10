@@ -583,7 +583,7 @@ impl Decoder for Erc1155Decoder {
         "erc1155"
     }
 
-    async fn decode_event(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
         if event.keys.is_empty() {
             return Ok(Vec::new());
         }
@@ -649,7 +649,7 @@ mod tests {
             transaction_hash: Felt::from(0xabcdu64),
         };
 
-        let envelopes = decoder.decode_event(&event).await.unwrap();
+        let envelopes = decoder.decode(&event).await.unwrap();
         assert_eq!(envelopes.len(), 1);
 
         let transfer = envelopes[0]
@@ -682,7 +682,7 @@ mod tests {
             transaction_hash: Felt::from(0xef01u64),
         };
 
-        let envelopes = decoder.decode_event(&event).await.unwrap();
+        let envelopes = decoder.decode(&event).await.unwrap();
         assert_eq!(envelopes.len(), 1);
 
         let approval = envelopes[0]
@@ -719,7 +719,7 @@ mod tests {
             transaction_hash: Felt::from(0xabcdu64),
         };
 
-        let envelopes = decoder.decode_event(&event).await.unwrap();
+        let envelopes = decoder.decode(&event).await.unwrap();
         assert_eq!(envelopes.len(), 1);
 
         let transfer = envelopes[0]
@@ -757,7 +757,7 @@ mod tests {
             transaction_hash: Felt::from(0xabcfu64),
         };
 
-        let envelopes = decoder.decode_event(&event).await.unwrap();
+        let envelopes = decoder.decode(&event).await.unwrap();
         assert_eq!(envelopes.len(), 2);
 
         let first = envelopes[0]
@@ -795,7 +795,7 @@ mod tests {
             transaction_hash: Felt::from(0xabd0u64),
         };
 
-        let envelopes = decoder.decode_event(&event).await.unwrap();
+        let envelopes = decoder.decode(&event).await.unwrap();
         assert_eq!(envelopes.len(), 1);
 
         let uri = envelopes[0]

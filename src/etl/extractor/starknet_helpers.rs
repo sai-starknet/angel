@@ -1,16 +1,17 @@
+use crate::etl::StarknetEvent;
+
+use super::{BlockContext, BlockData, DeclaredClass, DeployedContract, TransactionContext};
 use anyhow::{Context, Result};
 use starknet::core::types::contract::{AbiEntry, TypedAbiEvent};
-use starknet::core::types::requests::GetClassAtRequest;
-use starknet::core::types::LegacyContractAbiEntry;
+use starknet::core::types::requests::{GetBlockWithReceiptsRequest, GetClassAtRequest};
 use starknet::core::types::{
-    requests::GetBlockWithReceiptsRequest, BlockId, ContractClass, DeclareTransactionContent,
-    DeployAccountTransactionContent, EmittedEvent, ExecutionResult, Felt, InvokeTransactionContent,
+    BlockId, ContractClass, DeclareTransactionContent, DeployAccountTransactionContent,
+    ExecutionResult, InvokeTransactionContent, LegacyContractAbiEntry,
     MaybePreConfirmedBlockWithReceipts, TransactionContent, TransactionReceipt,
 };
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
 use std::collections::HashSet;
-
-use super::{BlockContext, BlockData, DeclaredClass, DeployedContract, TransactionContext};
 
 #[inline]
 fn is_execution_succeeded(execution_result: &ExecutionResult) -> bool {
@@ -88,7 +89,7 @@ where
         .map(|&class_hash| {
             ProviderRequestData::GetClassAt(GetClassAtRequest {
                 block_id: BlockId::Tag(starknet::core::types::BlockTag::Latest),
-                contract_address: class_hash,
+                contract_address: class_hash.into(),
             })
         })
         .collect();
@@ -153,8 +154,8 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
 
     let block_context = BlockContext {
         number: block_with_receipts.block_number,
-        hash: block_with_receipts.block_hash,
-        parent_hash: block_with_receipts.parent_hash,
+        hash: block_with_receipts.block_hash.into(),
+        parent_hash: block_with_receipts.parent_hash.into(),
         timestamp: block_with_receipts.timestamp,
     };
 
@@ -178,7 +179,8 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
             TransactionReceipt::Declare(r) => r.transaction_hash,
             TransactionReceipt::Deploy(r) => r.transaction_hash,
             TransactionReceipt::DeployAccount(r) => r.transaction_hash,
-        };
+        }
+        .into();
 
         if !is_receipt_succeeded(&receipt) {
             skipped_reverted += 1;
@@ -242,20 +244,20 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
                 }
             },
         };
-
+        let sender_address = sender_address.map(Into::into);
         // Build transaction context
         transaction_contexts.push(TransactionContext {
             hash: tx_hash,
             block_number: block_with_receipts.block_number,
-            sender_address,
-            calldata,
+            sender_address: sender_address,
+            calldata: calldata.into_iter().map(Into::into).collect(),
         });
 
         // Extract declared classes from Declare transactions
         if let Some((class_hash, compiled_class_hash)) = declare_info {
             declared_classes.push(DeclaredClass {
-                class_hash,
-                compiled_class_hash,
+                class_hash: class_hash.into(),
+                compiled_class_hash: compiled_class_hash.map(Into::into),
                 transaction_hash: tx_hash,
             });
         }
@@ -264,15 +266,15 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
         match &receipt {
             TransactionReceipt::Deploy(deploy_receipt) => {
                 deployed_contracts.push(DeployedContract {
-                    contract_address: deploy_receipt.contract_address,
+                    contract_address: deploy_receipt.contract_address.into(),
                     class_hash: Felt::ZERO, // Old Deploy doesn't have class_hash accessible easily
                     transaction_hash: tx_hash,
                 });
             }
             TransactionReceipt::DeployAccount(deploy_account_receipt) => {
                 deployed_contracts.push(DeployedContract {
-                    contract_address: deploy_account_receipt.contract_address,
-                    class_hash: deploy_account_class.unwrap_or(Felt::ZERO),
+                    contract_address: deploy_account_receipt.contract_address.into(),
+                    class_hash: deploy_account_class.map(Into::into).unwrap_or(Felt::ZERO),
                     transaction_hash: tx_hash,
                 });
             }
@@ -288,17 +290,15 @@ pub fn block_into_contexts(block: MaybePreConfirmedBlockWithReceipts) -> Result<
             TransactionReceipt::DeployAccount(r) => r.events,
         };
 
-        // Convert to EmittedEvent format - move ownership to avoid cloning
-        for event in events {
-            all_events.push(EmittedEvent {
-                from_address: event.from_address,
-                keys: event.keys,
-                data: event.data,
-                block_hash: Some(block_with_receipts.block_hash),
-                block_number: Some(block_with_receipts.block_number),
-                transaction_hash: tx_hash,
-            });
-        }
+        all_events.extend(events.into_iter().map(|e| {
+            StarknetEvent::new(
+                e.from_address.into(),
+                e.keys.into_iter().map(Into::into).collect(),
+                e.data.into_iter().map(Into::into).collect(),
+                block_with_receipts.block_number,
+                tx_hash,
+            )
+        }))
     }
 
     tracing::debug!(

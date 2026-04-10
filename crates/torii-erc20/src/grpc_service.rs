@@ -5,25 +5,26 @@
 //! - Real-time subscriptions with filtering (SubscribeTransfers, SubscribeApprovals)
 //! - Indexer statistics (GetStats)
 
+use crate::proto::erc20_server::Erc20 as Erc20Trait;
 use crate::proto::{
-    erc20_server::Erc20 as Erc20Trait, Approval, ApprovalFilter, ApprovalUpdate, BalanceEntry,
-    Cursor, GetApprovalsRequest, GetApprovalsResponse, GetBalanceRequest, GetBalanceResponse,
-    GetBalancesRequest, GetBalancesResponse, GetStatsRequest, GetStatsResponse,
-    GetTokenMetadataRequest, GetTokenMetadataResponse, GetTransfersRequest, GetTransfersResponse,
-    SubscribeApprovalsRequest, SubscribeTransfersRequest, TokenMetadataEntry, Transfer,
-    TransferFilter, TransferUpdate,
+    Approval, ApprovalFilter, ApprovalUpdate, BalanceEntry, Cursor, GetApprovalsRequest,
+    GetApprovalsResponse, GetBalanceRequest, GetBalanceResponse, GetBalancesRequest,
+    GetBalancesResponse, GetStatsRequest, GetStatsResponse, GetTokenMetadataRequest,
+    GetTokenMetadataResponse, GetTransfersRequest, GetTransfersResponse, SubscribeApprovalsRequest,
+    SubscribeTransfersRequest, TokenMetadataEntry, Transfer, TransferFilter, TransferUpdate,
 };
 use crate::storage::{
     ApprovalCursor, ApprovalData, Erc20Storage, TransferCursor, TransferData, TransferDirection,
 };
 use async_trait::async_trait;
 use futures::stream::Stream;
-use starknet::core::types::Felt;
+use primitive_types::U256;
+use starknet_types_raw::Felt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tonic::{Request, Response, Status};
-use torii_common::{bytes_to_felt, u256_to_bytes};
+use torii_common::u256_to_bytes;
 
 /// gRPC service implementation for ERC20
 #[derive(Clone)]
@@ -72,12 +73,12 @@ impl Erc20Service {
     /// Convert storage TransferData to proto Transfer
     fn transfer_data_to_proto(data: &TransferData) -> Transfer {
         Transfer {
-            token: data.token.to_bytes_be().to_vec(),
-            from: data.from.to_bytes_be().to_vec(),
-            to: data.to.to_bytes_be().to_vec(),
+            token: data.token.to_be_bytes_vec(),
+            from: data.from.to_be_bytes_vec(),
+            to: data.to.to_be_bytes_vec(),
             amount: u256_to_bytes(data.amount),
             block_number: data.block_number,
-            tx_hash: data.tx_hash.to_bytes_be().to_vec(),
+            tx_hash: data.tx_hash.to_be_bytes_vec(),
             timestamp: data.timestamp.unwrap_or(0),
         }
     }
@@ -85,12 +86,12 @@ impl Erc20Service {
     /// Convert storage ApprovalData to proto Approval
     fn approval_data_to_proto(data: &ApprovalData) -> Approval {
         Approval {
-            token: data.token.to_bytes_be().to_vec(),
-            owner: data.owner.to_bytes_be().to_vec(),
-            spender: data.spender.to_bytes_be().to_vec(),
+            token: data.token.to_be_bytes_vec(),
+            owner: data.owner.to_be_bytes_vec(),
+            spender: data.spender.to_be_bytes_vec(),
             amount: u256_to_bytes(data.amount),
             block_number: data.block_number,
-            tx_hash: data.tx_hash.to_bytes_be().to_vec(),
+            tx_hash: data.tx_hash.to_be_bytes_vec(),
             timestamp: data.timestamp.unwrap_or(0),
         }
     }
@@ -213,13 +214,22 @@ impl Erc20Trait for Erc20Service {
         let filter = req.filter.unwrap_or_default();
 
         // Parse filter fields
-        let wallet = filter.wallet.as_ref().and_then(|b| bytes_to_felt(b));
-        let from = filter.from.as_ref().and_then(|b| bytes_to_felt(b));
-        let to = filter.to.as_ref().and_then(|b| bytes_to_felt(b));
+        let wallet = filter
+            .wallet
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
+        let from = filter
+            .from
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
+        let to = filter
+            .to
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
         let tokens: Vec<Felt> = filter
             .tokens
             .iter()
-            .filter_map(|b| bytes_to_felt(b))
+            .filter_map(|b| Felt::from_be_bytes_slice(b).ok())
             .collect();
 
         let direction = match crate::proto::TransferDirection::try_from(filter.direction) {
@@ -298,13 +308,22 @@ impl Erc20Trait for Erc20Service {
         let filter = req.filter.unwrap_or_default();
 
         // Parse filter fields
-        let account = filter.account.as_ref().and_then(|b| bytes_to_felt(b));
-        let owner = filter.owner.as_ref().and_then(|b| bytes_to_felt(b));
-        let spender = filter.spender.as_ref().and_then(|b| bytes_to_felt(b));
+        let account = filter
+            .account
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
+        let owner = filter
+            .owner
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
+        let spender = filter
+            .spender
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
         let tokens: Vec<Felt> = filter
             .tokens
             .iter()
-            .filter_map(|b| bytes_to_felt(b))
+            .filter_map(|b| Felt::from_be_bytes_slice(b).ok())
             .collect();
 
         // Parse cursor
@@ -374,10 +393,10 @@ impl Erc20Trait for Erc20Service {
     ) -> Result<Response<GetBalanceResponse>, Status> {
         let req = request.into_inner();
 
-        let token = bytes_to_felt(&req.token)
-            .ok_or_else(|| Status::invalid_argument("Invalid token address"))?;
-        let wallet = bytes_to_felt(&req.wallet)
-            .ok_or_else(|| Status::invalid_argument("Invalid wallet address"))?;
+        let token = Felt::from_be_bytes_slice(&req.token)
+            .map_err(|_| Status::invalid_argument("Invalid token address"))?;
+        let wallet = Felt::from_be_bytes_slice(&req.wallet)
+            .map_err(|_| Status::invalid_argument("Invalid wallet address"))?;
 
         tracing::debug!(
             target: "torii_erc20::grpc",
@@ -391,7 +410,7 @@ impl Erc20Trait for Erc20Service {
             .get_balance_with_block(token, wallet)
             .await
             .map_err(|e| Status::internal(format!("Query failed: {e}")))?
-            .unwrap_or((starknet::core::types::U256::from(0u64), 0));
+            .unwrap_or((U256::zero(), 0));
 
         Ok(Response::new(GetBalanceResponse {
             balance: u256_to_bytes(balance),
@@ -406,8 +425,14 @@ impl Erc20Trait for Erc20Service {
     ) -> Result<Response<GetBalancesResponse>, Status> {
         let req = request.into_inner();
 
-        let token = req.token.as_ref().and_then(|b| bytes_to_felt(b));
-        let wallet = req.wallet.as_ref().and_then(|b| bytes_to_felt(b));
+        let token = req
+            .token
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
+        let wallet = req
+            .wallet
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
         let cursor = req.cursor;
         let limit = if req.limit == 0 {
             1000
@@ -433,8 +458,8 @@ impl Erc20Trait for Erc20Service {
         let rows = balances
             .into_iter()
             .map(|b| BalanceEntry {
-                token: b.token.to_bytes_be().to_vec(),
-                wallet: b.wallet.to_bytes_be().to_vec(),
+                token: b.token.to_be_bytes_vec(),
+                wallet: b.wallet.to_be_bytes_vec(),
                 balance: u256_to_bytes(b.balance),
                 last_block: b.last_block,
             })
@@ -454,12 +479,12 @@ impl Erc20Trait for Erc20Service {
         let req = request.into_inner();
 
         if let Some(token_bytes) = req.token {
-            let token = bytes_to_felt(&token_bytes)
-                .ok_or_else(|| Status::invalid_argument("Invalid token address"))?;
+            let token = Felt::from_be_bytes_slice(&token_bytes)
+                .map_err(|_| Status::invalid_argument("Invalid token address"))?;
 
             let entries = match self.storage.get_token_metadata(token).await {
                 Ok(Some((name, symbol, decimals, total_supply))) => vec![TokenMetadataEntry {
-                    token: token.to_bytes_be().to_vec(),
+                    token: token.to_be_bytes_vec(),
                     name,
                     symbol,
                     decimals: decimals.map(|d| d as u32),
@@ -475,7 +500,10 @@ impl Erc20Trait for Erc20Service {
             }));
         }
 
-        let cursor = req.cursor.as_ref().and_then(|b| bytes_to_felt(b));
+        let cursor = req
+            .cursor
+            .as_ref()
+            .and_then(|b| Felt::from_be_bytes_slice(b).ok());
         let limit = if req.limit == 0 {
             100
         } else {
@@ -492,7 +520,7 @@ impl Erc20Trait for Erc20Service {
             .into_iter()
             .map(
                 |(token, name, symbol, decimals, total_supply)| TokenMetadataEntry {
-                    token: token.to_bytes_be().to_vec(),
+                    token: token.to_be_bytes_vec(),
                     name,
                     symbol,
                     decimals: decimals.map(|d| d as u32),
@@ -503,7 +531,7 @@ impl Erc20Trait for Erc20Service {
 
         Ok(Response::new(GetTokenMetadataResponse {
             tokens: entries,
-            next_cursor: next_cursor.map(|c| c.to_bytes_be().to_vec()),
+            next_cursor: next_cursor.map(|c| c.to_be_bytes_vec()),
         }))
     }
 

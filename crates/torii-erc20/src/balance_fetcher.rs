@@ -7,11 +7,15 @@ use anyhow::{Context, Result};
 
 /// Maximum number of requests per batch to avoid RPC limits
 const MAX_BATCH_SIZE: usize = 500;
-use starknet::core::types::{requests::CallRequest, BlockId, Felt, FunctionCall, U256};
+use primitive_types::U256;
+use starknet::core::types::requests::CallRequest;
+use starknet::core::types::{BlockId, FunctionCall};
 use starknet::macros::selector;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
 use std::sync::Arc;
+use torii_common::utils::felts_to_u256;
 
 /// Request for fetching a balance at a specific block
 #[derive(Debug, Clone)]
@@ -22,6 +26,22 @@ pub struct BalanceFetchRequest {
     pub wallet: Felt,
     /// Block number to fetch balance at (typically block N-1 before the transfer)
     pub block_number: u64,
+}
+
+pub struct Balance {
+    pub token: Felt,
+    pub wallet: Felt,
+    pub balance: U256,
+}
+
+impl Balance {
+    pub fn new(token: Felt, wallet: Felt, balance: U256) -> Self {
+        Self {
+            token,
+            wallet,
+            balance,
+        }
+    }
 }
 
 /// Balance fetcher for ERC20 tokens
@@ -49,17 +69,19 @@ impl BalanceFetcher {
         block_number: u64,
     ) -> Result<U256> {
         let call = FunctionCall {
-            contract_address: token,
+            contract_address: token.into(),
             // TODO: Some contracts use balance_of (snake_case), others use balanceOf (camelCase).
             // We need a strategy to handle both - possibly try one, fallback to other, or use ABI.
             entry_point_selector: selector!("balanceOf"),
-            calldata: vec![wallet],
+            calldata: vec![wallet.into()],
         };
 
         let block_id = BlockId::Number(block_number);
 
         match self.provider.call(call, block_id).await {
-            Ok(result) => Ok(parse_u256_result(&result)),
+            Ok(result) => Ok(felts_to_u256(
+                &result.into_iter().map(Into::into).collect::<Vec<_>>(),
+            )?),
             Err(e) => {
                 tracing::warn!(
                     target: "torii_erc20::balance_fetcher",
@@ -84,7 +106,7 @@ impl BalanceFetcher {
     pub async fn fetch_balances_batch(
         &self,
         requests: &[BalanceFetchRequest],
-    ) -> Result<Vec<(Felt, Felt, U256)>> {
+    ) -> Result<Vec<Balance>> {
         if requests.is_empty() {
             return Ok(Vec::new());
         }
@@ -101,9 +123,9 @@ impl BalanceFetcher {
                 .map(|req| {
                     ProviderRequestData::Call(CallRequest {
                         request: FunctionCall {
-                            contract_address: req.token,
+                            contract_address: req.token.into(),
                             entry_point_selector: selector!("balanceOf"),
-                            calldata: vec![req.wallet],
+                            calldata: vec![req.wallet.into()],
                         },
                         block_id: BlockId::Number(req.block_number),
                     })
@@ -121,7 +143,7 @@ impl BalanceFetcher {
             for (idx, response) in responses.into_iter().enumerate() {
                 let req = &chunk[idx];
                 let balance = if let ProviderResponseData::Call(felts) = response {
-                    parse_u256_result(&felts)
+                    felts_to_u256(felts.into_iter().map(Into::into).collect::<Vec<_>>())?
                 } else {
                     tracing::warn!(
                         target: "torii_erc20::balance_fetcher",
@@ -132,7 +154,7 @@ impl BalanceFetcher {
                     );
                     U256::from(0u64)
                 };
-                all_results.push((req.token, req.wallet, balance));
+                all_results.push(Balance::new(req.token, req.wallet, balance));
             }
         }
 
@@ -143,69 +165,5 @@ impl BalanceFetcher {
         );
 
         Ok(all_results)
-    }
-}
-
-/// Parse a U256 result from balance_of return value
-///
-/// ERC20 balance_of typically returns:
-/// - Cairo 0: A single felt (fits in 252 bits, usually enough for balances)
-/// - Cairo 1 with u256: Two felts [low, high] representing a 256-bit value
-fn parse_u256_result(result: &[Felt]) -> U256 {
-    match result.len() {
-        0 => U256::from(0u64),
-        1 => {
-            // Single felt - convert to U256
-            // Felt is 252 bits max, so it fits in the low part
-            let bytes = result[0].to_bytes_be();
-            // Take the lower 16 bytes for u128 (fits any felt value)
-            let low = u128::from_be_bytes(bytes[16..32].try_into().unwrap());
-            U256::from_words(low, 0)
-        }
-        _ => {
-            // Two felts: [low, high] for u256
-            let low_bytes = result[0].to_bytes_be();
-            let high_bytes = result[1].to_bytes_be();
-
-            let low = u128::from_be_bytes(low_bytes[16..32].try_into().unwrap());
-            let high = u128::from_be_bytes(high_bytes[16..32].try_into().unwrap());
-
-            U256::from_words(low, high)
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_u256_empty() {
-        let result = parse_u256_result(&[]);
-        assert_eq!(result, U256::from(0u64));
-    }
-
-    #[test]
-    fn test_parse_u256_single_felt() {
-        let felt = Felt::from(1000u64);
-        let result = parse_u256_result(&[felt]);
-        assert_eq!(result, U256::from(1000u64));
-    }
-
-    #[test]
-    fn test_parse_u256_two_felts() {
-        // low = 100, high = 0
-        let low = Felt::from(100u64);
-        let high = Felt::from(0u64);
-        let result = parse_u256_result(&[low, high]);
-        assert_eq!(result, U256::from(100u64));
-
-        // Test with high value
-        let low = Felt::from(0u64);
-        let high = Felt::from(1u64);
-        let result = parse_u256_result(&[low, high]);
-        // high = 1 means value = 1 * 2^128
-        let expected = U256::from_words(0, 1);
-        assert_eq!(result, expected);
     }
 }

@@ -13,9 +13,10 @@ pub mod synthetic_adapter;
 pub mod synthetic_erc20;
 
 use crate::etl::engine_db::EngineDb;
+use crate::etl::StarknetEvent;
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
+use starknet_types_raw::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -29,16 +30,7 @@ pub use starknet_helpers::ContractAbi;
 pub use synthetic::SyntheticExtractor;
 pub use synthetic_adapter::SyntheticExtractorAdapter;
 pub use synthetic_erc20::{SyntheticErc20Config, SyntheticErc20Extractor};
-
-/// Block context information
-#[derive(Debug, Clone, Default)]
-pub struct BlockContext {
-    pub number: u64,
-    pub hash: Felt,
-    pub parent_hash: Felt,
-    pub timestamp: u64,
-}
-
+pub use torii_types::block::BlockContext;
 /// Transaction context information
 #[derive(Debug, Clone, Default)]
 pub struct TransactionContext {
@@ -46,13 +38,6 @@ pub struct TransactionContext {
     pub block_number: u64,
     pub sender_address: Option<Felt>,
     pub calldata: Vec<Felt>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct EventContext {
-    pub from_address: Felt,
-    pub transaction: Arc<TransactionContext>,
-    pub block: Arc<BlockContext>,
 }
 
 /// Declared class information
@@ -76,7 +61,7 @@ pub struct DeployedContract {
 pub struct BlockData {
     pub block_context: BlockContext,
     pub transactions: Vec<TransactionContext>,
-    pub events: Vec<EmittedEvent>,
+    pub events: Vec<StarknetEvent>,
     pub declared_classes: Vec<DeclaredClass>,
     pub deployed_contracts: Vec<DeployedContract>,
 }
@@ -110,7 +95,7 @@ pub struct BlockData {
 #[derive(Debug, Clone)]
 pub struct ExtractionBatch {
     /// Events extracted (may contain duplicates from same block/tx)
-    pub events: Vec<EmittedEvent>,
+    pub events: Vec<StarknetEvent>,
 
     /// Block context (deduplicated by block_number for memory efficiency)
     pub blocks: HashMap<u64, Arc<BlockContext>>,
@@ -240,29 +225,28 @@ impl ExtractionBatch {
         );
     }
     // Add an event to the batch
-    pub fn add_event(&mut self, event: EmittedEvent) {
+    pub fn add_event(&mut self, event: StarknetEvent) {
         self.events.push(event);
     }
     // Add an event with transaction context (block_number and sender_address) to the batch
     // Returns None if block_number is missing from event and does not updated, since we need it to add transaction context
     pub fn add_event_with_tx_context(
         &mut self,
-        event: EmittedEvent,
+        event: StarknetEvent,
         sender_address: Option<Felt>,
         calldata: Vec<Felt>,
-    ) -> Option<()> {
+    ) {
         self.add_transaction_context(
             event.transaction_hash,
-            event.block_number?,
+            event.block_number,
             sender_address,
             calldata,
         );
         self.events.push(event);
-        Some(())
     }
 
     // Add multiple events to the batch
-    pub fn add_events(&mut self, events: Vec<EmittedEvent>) {
+    pub fn add_events(&mut self, events: Vec<StarknetEvent>) {
         self.events.extend(events);
     }
     // add a declared class to the batch
@@ -307,17 +291,6 @@ impl ExtractionBatch {
 
     pub fn remove_chain_head(&mut self) {
         self.chain_head = None;
-    }
-
-    pub fn get_event_context(&self, tx_hash: &Felt, from_address: Felt) -> Option<EventContext> {
-        let transaction = self.transactions.get(tx_hash)?.clone();
-        let block = self.blocks.get(&transaction.block_number)?.clone();
-
-        Some(EventContext {
-            from_address,
-            transaction,
-            block,
-        })
     }
 }
 

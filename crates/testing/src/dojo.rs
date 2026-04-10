@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use dojo_introspect::{DojoIntrospectResult, DojoSchema, DojoSchemaFetcher, DojoSerde};
 use introspect_types::CairoDeserialize;
 use resolve_path::PathResolveExt;
-use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt;
 use std::path::PathBuf;
 
 use crate::read_json_file;

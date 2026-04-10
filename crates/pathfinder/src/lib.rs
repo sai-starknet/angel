@@ -11,5 +11,5 @@ pub mod extractor;
 mod test;
 
 pub use error::{PFError, PFResult};
-pub use fetcher::{BlockContext, EventFetcher};
+pub use fetcher::EventFetcher;
 pub use utils::connect;

@@ -1,16 +1,15 @@
-use anyhow::{Context, Result};
-use futures::stream::{self, StreamExt};
-use starknet::core::types::{
-    requests::{GetBlockWithTxHashesRequest, GetTransactionReceiptRequest},
-    BlockId, EmittedEvent, ExecutionResult, Felt, MaybePreConfirmedBlockWithTxHashes,
-};
-use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
-use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
 use crate::etl::engine_db::EngineDb;
 use crate::etl::extractor::{BlockContext, ExtractionBatch, RetryPolicy, TransactionContext};
+use crate::etl::StarknetEvent;
+use anyhow::{Context, Result};
+use futures::stream::{self, StreamExt};
+use starknet::core::types::requests::{GetBlockWithTxHashesRequest, GetTransactionReceiptRequest};
+use starknet::core::types::{BlockId, ExecutionResult, MaybePreConfirmedBlockWithTxHashes};
+use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
+use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 const RECEIPT_LOOKUP_BATCH_SIZE: usize = 200;
 
@@ -153,7 +152,7 @@ pub(crate) async fn fetch_successful_transaction_hashes(
                 .iter()
                 .map(|tx_hash| {
                     ProviderRequestData::GetTransactionReceipt(GetTransactionReceiptRequest {
-                        transaction_hash: *tx_hash,
+                        transaction_hash: tx_hash.into(),
                     })
                 })
                 .collect();
@@ -235,9 +234,9 @@ pub(crate) async fn fetch_successful_transaction_hashes(
 }
 
 pub(crate) fn filter_events_by_tx_hashes(
-    events: Vec<EmittedEvent>,
+    events: Vec<StarknetEvent>,
     successful_transaction_hashes: &HashSet<Felt>,
-) -> Vec<EmittedEvent> {
+) -> Vec<StarknetEvent> {
     events
         .into_iter()
         .filter(|event| successful_transaction_hashes.contains(&event.transaction_hash))
@@ -248,15 +247,15 @@ pub(crate) async fn build_batch(
     provider: Arc<JsonRpcClient<HttpTransport>>,
     retry_policy: &RetryPolicy,
     rpc_parallelism: usize,
-    events: Vec<EmittedEvent>,
+    events: Vec<StarknetEvent>,
     engine_db: &EngineDb,
 ) -> Result<ExtractionBatch> {
     let block_numbers: Vec<u64> = events
         .iter()
-        .filter_map(|e| e.block_number)
+        .map(|e| e.block_number)
         .collect::<std::collections::HashSet<_>>()
         .into_iter()
-        .collect();
+        .collect::<Vec<_>>();
 
     let timestamps = fetch_block_timestamps(
         provider,
@@ -283,18 +282,16 @@ pub(crate) async fn build_batch(
 
     let mut transactions = HashMap::new();
     for event in &events {
-        if let Some(block_number) = event.block_number {
-            transactions
-                .entry(event.transaction_hash)
-                .or_insert_with(|| {
-                    Arc::new(TransactionContext {
-                        hash: event.transaction_hash,
-                        block_number,
-                        sender_address: None,
-                        calldata: Vec::new(),
-                    })
-                });
-        }
+        transactions
+            .entry(event.transaction_hash)
+            .or_insert_with(|| {
+                Arc::new(TransactionContext {
+                    hash: event.transaction_hash,
+                    block_number: event.block_number,
+                    sender_address: None,
+                    calldata: Vec::new(),
+                })
+            });
     }
 
     Ok(ExtractionBatch {

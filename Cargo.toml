@@ -9,19 +9,16 @@ members = [
   "crates/torii-controllers-sink",
   "crates/arcade-sink",
   "crates/torii-ecs-sink",
-  "crates/torii-entities-historical-sink",
   "crates/torii-erc20",
   "crates/torii-erc721",
   "crates/torii-erc1155",
+  "crates/sql",
   "crates/introspect",
   "crates/dojo",
-  "crates/introspect-postgres-sink",
-  "crates/introspect-sqlite-sink",
+  "crates/introspect-sql-sink",
   "crates/testing",
-  "crates/postgres",
-  "crates/sqlite",
   "crates/pathfinder",
-  "crates/starknet",
+  "crates/types",
   "bins/torii-erc20",
   "bins/torii-erc20-synth",
   "bins/torii-introspect-bin",
@@ -72,6 +69,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.17"
+log = "0.4.29"
 
 # CLI
 clap = { version = "4.5", features = ["derive"] }
@@ -80,13 +78,11 @@ clap = { version = "4.5", features = ["derive"] }
 starknet = "0.17"
 
 # Database
-sqlx = { version = "0.8.6", features = [
+sqlx = { git = "https://github.com/bengineer42/sqlx", version = "0.8.6", features = [
   "runtime-tokio",
-  "sqlite",
-  "postgres",
-  "any",
-] }
+], rev = "22a01d3" } # Used patched version of sqlx with SqliteConnectOptions support (PR in progress: https://github.com/launchbadge/sqlx/pull/4209)
 crc = "3.4.0"
+rusqlite = { version = "0.32.1", features = ["bundled"] }
 
 # Hashing
 blake3 = "1.8.3"
@@ -110,15 +106,16 @@ hex = "0.4"
 primitive-types = { version = "0.14.0", features = ["serde"] }
 starknet-types-core = "0.2.0"
 bigdecimal = "0.4.10"
+starknet-types-raw = { git = "https://github.com/cartridge-gg/starknet-types-raw", branch = "main" }
 
 # Build
 tonic-build = "0.12"
 
 # Introspect
-introspect-events = { git = "https://github.com/cartridge-gg/introspect", rev = "34e93c1" }
-introspect-types = { git = "https://github.com/cartridge-gg/introspect", rev = "34e93c1" }
-introspect-rust-macros = { git = "https://github.com/cartridge-gg/introspect", rev = "34e93c1" }
-dojo-introspect = { git = "https://github.com/dojoengine/dojo-introspect", rev = "aadc3c9" }
+introspect-events = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
+introspect-types = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
+introspect-rust-macros = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
+dojo-introspect = { git = "https://github.com/dojoengine/dojo-introspect", rev = "1345486" }
 
 
 # Utils
@@ -133,25 +130,21 @@ torii-config-common = { path = "crates/torii-config-common" }
 torii-runtime-common = { path = "crates/torii-runtime-common" }
 
 # Internal crates
+torii-sql = { path = "crates/sql" }
 torii-sql-sink.path = "crates/torii-sql-sink"
 torii-log-sink.path = "crates/torii-log-sink"
 torii-controllers-sink.path = "crates/torii-controllers-sink"
 torii-arcade-sink.path = "crates/arcade-sink"
 torii-ecs-sink.path = "crates/torii-ecs-sink"
-torii-entities-historical-sink.path = "crates/torii-entities-historical-sink"
 torii-erc20.path = "crates/torii-erc20"
 torii-erc721.path = "crates/torii-erc721"
 torii-erc1155.path = "crates/torii-erc1155"
 torii-dojo.path = "./crates/dojo"
 torii-introspect.path = "crates/introspect"
-torii-introspect-postgres-sink.path = "./crates/introspect-postgres-sink"
-torii-introspect-sqlite-sink.path = "./crates/introspect-sqlite-sink"
+torii-introspect-sql-sink.path = "./crates/introspect-sql-sink"
 torii-test-utils.path = "crates/testing"
-torii-postgres.path = "crates/postgres"
-torii-sqlite.path = "crates/sqlite"
 torii-pathfinder.path = "crates/pathfinder"
-torii-starknet.path = "crates/starknet"
-
+torii-types.path = "crates/types"
 
 [lib]
 name = "torii"
@@ -178,10 +171,6 @@ name = "test_block_extractor"
 path = "examples/test_block_extractor/main.rs"
 
 [[example]]
-name = "introspect_simple"
-path = "examples/introspect/simple.rs"
-
-[[example]]
 name = "introspect_restart"
 path = "examples/introspect/restart.rs"
 
@@ -204,8 +193,9 @@ prost-types.workspace = true
 rustls-pemfile = "2.0"
 serde_json.workspace = true
 serde.workspace = true
-sqlx.workspace = true
+sqlx = { workspace = true, features = ["sqlite"] }
 starknet.workspace = true
+starknet-types-raw = { workspace = true, features = ["events"] }
 tokio-stream.workspace = true
 tokio-rustls = { version = "0.26", default-features = false, features = [
   "logging",
@@ -218,6 +208,7 @@ tonic-reflection.workspace = true
 tonic-web.workspace = true
 tonic.workspace = true
 torii-common.workspace = true
+torii-types = { workspace = true, features = ["field"] }
 tower.workspace = true
 tower-http.workspace = true
 tracing.workspace = true
@@ -239,21 +230,18 @@ resolve-path.workspace = true
 itertools.workspace = true
 dojo-introspect.workspace = true
 
+
+torii-sql = { workspace = true, features = ["postgres", "sqlite"] }
 torii-sql-sink.workspace = true
 torii-log-sink.workspace = true
 torii-erc20.workspace = true
 torii-erc721.workspace = true
 torii-erc1155.workspace = true
-torii-dojo.workspace = true
+torii-dojo = { workspace = true, features = ["postgres", "sqlite"] }
 torii-introspect.workspace = true
 torii-common.workspace = true
-torii-introspect-postgres-sink.workspace = true
 torii-test-utils.workspace = true
 torii-pathfinder.workspace = true
-
-
-# Example dependencies
-
 
 [[bench]]
 name = "perf_harness"

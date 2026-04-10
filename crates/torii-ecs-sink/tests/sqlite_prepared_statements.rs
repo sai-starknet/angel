@@ -23,8 +23,7 @@ fn runtime_sqlite_queries_avoid_uncached_prepare_and_inline_format_sql() {
     let root = workspace_root();
     let files = [
         "crates/torii-ecs-sink/src/grpc_service.rs",
-        "crates/torii-entities-historical-sink/src/lib.rs",
-        "crates/introspect-sqlite-sink/src/processor.rs",
+        "crates/introspect-sql-sink/src/sqlite/table.rs",
         "crates/torii-erc20/src/storage.rs",
         "crates/torii-erc721/src/storage.rs",
         "crates/torii-erc1155/src/storage.rs",

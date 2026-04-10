@@ -1,16 +1,13 @@
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use async_trait::async_trait;
 use starknet::core::types::Felt;
 use torii::axum::Router;
-use torii::etl::{
-    envelope::{Envelope, TypeId},
-    extractor::ExtractionBatch,
-    sink::{EventBus, Sink, SinkContext, TopicInfo},
-};
+use torii::etl::envelope::{Envelope, TypeId};
+use torii::etl::extractor::ExtractionBatch;
+use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
 use torii_introspect::events::{IntrospectBody, IntrospectMsg};
 
 use crate::grpc_service::ArcadeService;
@@ -372,10 +369,8 @@ mod tests {
     use std::str::FromStr;
 
     use anyhow::Result;
-    use sqlx::{
-        sqlite::{SqliteConnectOptions, SqlitePoolOptions},
-        Row,
-    };
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+    use sqlx::Row;
     use starknet::core::types::Felt;
     use tempfile::tempdir;
     use torii::etl::extractor::ExtractionBatch;
@@ -392,7 +387,7 @@ mod tests {
 
     fn introspect_envelope(msg: IntrospectMsg) -> Envelope {
         Envelope::from(IntrospectBody {
-            metadata: MetaData {
+            context: MetaData {
                 block_number: Some(1),
                 transaction_hash: Felt::ZERO,
                 from_address: Felt::ZERO,

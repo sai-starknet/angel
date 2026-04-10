@@ -1,22 +1,22 @@
-use std::str::FromStr;
-use std::sync::Arc;
-use std::time::Duration;
-
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::{
-    any::AnyPoolOptions, sqlite::SqliteConnectOptions, Any, ConnectOptions, Pool, QueryBuilder, Row,
-};
-use starknet::core::types::Felt;
+use sqlx::any::AnyPoolOptions;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{Any, ConnectOptions, Pool, QueryBuilder, Row};
+use starknet_types_raw::Felt;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use torii::axum::Router;
 use torii::etl::extractor::ExtractionBatch;
 use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
 use torii::etl::TypeId;
 use torii_runtime_common::database::DEFAULT_SQLITE_MAX_CONNECTIONS;
+use torii_sql::DbBackend;
 
 pub const DEFAULT_API_QUERY_URL: &str = "https://api.cartridge.gg/query";
 pub const CONTROLLERS_TABLE: &str = "controllers";
@@ -28,23 +28,6 @@ const CONTROLLERS_TYPE: TypeId = TypeId::new("controllers.sync");
 const CONTROLLER_PROCESSING_BATCH_SIZE: usize = 10_000;
 const SQLITE_CONTROLLER_UPSERT_BATCH_SIZE: usize = 199;
 const POSTGRES_CONTROLLER_UPSERT_BATCH_SIZE: usize = 10_000;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DbBackend {
-    Sqlite,
-    Postgres,
-}
-
-impl DbBackend {
-    fn detect(database_url: &str) -> Self {
-        if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
-            Self::Postgres
-        } else {
-            Self::Sqlite
-        }
-    }
-}
-
 #[derive(Debug, Clone, Deserialize)]
 struct ControllerAccount {
     username: String,
@@ -131,7 +114,7 @@ impl ControllersStore {
     async fn new(database_url: &str, max_connections: Option<u32>) -> Result<Self> {
         sqlx::any::install_default_drivers();
 
-        let backend = DbBackend::detect(database_url);
+        let backend = DbBackend::from_str(database_url).map_err(|e| anyhow!(e))?;
         let database_url = match backend {
             DbBackend::Postgres => database_url.to_string(),
             DbBackend::Sqlite => sqlite_url(database_url)?,
@@ -572,7 +555,9 @@ mod tests {
     use serde_json::Value;
     use sqlx::query_scalar;
     use tokio::net::TcpListener;
-    use torii::axum::{extract::State, routing::post, Json, Router};
+    use torii::axum::extract::State;
+    use torii::axum::routing::post;
+    use torii::axum::{Json, Router};
     use torii::command::CommandBus;
     use torii::grpc::SubscriptionManager;
 

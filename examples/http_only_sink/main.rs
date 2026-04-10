@@ -14,12 +14,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use starknet::core::types::EmittedEvent;
 use std::sync::{Arc, RwLock};
-use torii::axum::{
-    extract::State,
-    http::StatusCode,
-    routing::{get, post},
-    Json, Router,
-};
+use torii::axum::extract::State;
+use torii::axum::http::StatusCode;
+use torii::axum::routing::{get, post};
+use torii::axum::{Json, Router};
 use torii::etl::envelope::{Envelope, TypeId, TypedBody};
 use torii::etl::extractor::ExtractionBatch;
 use torii::etl::sink::{EventBus, Sink, SinkContext, TopicInfo};
@@ -270,7 +268,7 @@ impl Decoder for HttpDecoder {
         "http"
     }
 
-    async fn decode_event(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
         let id = self
             .counter
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);

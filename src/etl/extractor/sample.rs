@@ -5,17 +5,19 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
-use std::{collections::HashMap, sync::Arc};
+use starknet_types_raw::Felt;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::etl::engine_db::EngineDb;
+use crate::etl::StarknetEvent;
 
 use super::{BlockContext, ExtractionBatch, Extractor, TransactionContext};
 
 /// Simple extractor that cycles through predefined events
 pub struct SampleExtractor {
     /// Sample events to cycle through
-    events: Vec<EmittedEvent>,
+    events: Vec<StarknetEvent>,
     /// Current index in the events array
     current_index: usize,
     /// Number of events to return per extraction
@@ -30,7 +32,7 @@ impl SampleExtractor {
     /// # Arguments
     /// * `events` - Predefined events to cycle through
     /// * `batch_size` - Number of events to return per extraction
-    pub fn new(events: Vec<EmittedEvent>, batch_size: usize) -> Self {
+    pub fn new(events: Vec<StarknetEvent>, batch_size: usize) -> Self {
         Self {
             events,
             current_index: 0,
@@ -40,7 +42,7 @@ impl SampleExtractor {
     }
 
     /// Generate the next batch of events (cycling through the predefined list)
-    fn next_batch(&mut self) -> Vec<EmittedEvent> {
+    fn next_batch(&mut self) -> Vec<StarknetEvent> {
         if self.events.is_empty() {
             return Vec::new();
         }
@@ -52,8 +54,7 @@ impl SampleExtractor {
             let mut event = self.events[self.current_index].clone();
 
             // Update block number to current block
-            event.block_number = Some(self.current_block);
-            event.block_hash = Some(Felt::from(self.current_block));
+            event.block_number = self.current_block;
 
             // Generate unique transaction hash based on position
             event.transaction_hash = Felt::from(2000 + self.current_index as u64);
@@ -101,20 +102,18 @@ impl Extractor for SampleExtractor {
         // Create block context (deduplicated)
         let mut blocks = HashMap::new();
         for event in &events {
-            if let Some(block_num) = event.block_number {
-                blocks.entry(block_num).or_insert_with(|| {
-                    Arc::new(BlockContext {
-                        number: block_num,
-                        hash: event.block_hash.unwrap_or(Felt::ZERO),
-                        parent_hash: if block_num > 0 {
-                            Felt::from(block_num - 1)
-                        } else {
-                            Felt::ZERO
-                        },
-                        timestamp: 1700000000 + block_num, // Realistic timestamp
-                    })
-                });
-            }
+            blocks.entry(event.block_number).or_insert_with(|| {
+                Arc::new(BlockContext {
+                    number: event.block_number,
+                    hash: event.block_number.into(),
+                    parent_hash: if event.block_number > 0 {
+                        Felt::from(event.block_number - 1)
+                    } else {
+                        Felt::ZERO
+                    },
+                    timestamp: 1700000000 + event.block_number, // Realistic timestamp
+                })
+            });
         }
 
         // Create transaction context (deduplicated)
@@ -125,7 +124,7 @@ impl Extractor for SampleExtractor {
                 .or_insert_with(|| {
                     Arc::new(TransactionContext {
                         hash: event.transaction_hash,
-                        block_number: event.block_number.unwrap_or(0),
+                        block_number: event.block_number,
                         sender_address: Some(
                             Felt::from_hex(
                                 "0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd",
@@ -133,7 +132,7 @@ impl Extractor for SampleExtractor {
                             .unwrap(),
                         ),
                         calldata: vec![
-                            Felt::from(1),                  // selector
+                            Felt::from(0),                  // selector
                             Felt::from(self.current_block), // param1
                             Felt::from(42),                 // param2
                         ],
@@ -169,20 +168,18 @@ mod tests {
     async fn test_sample_extractor_cycling() {
         // Create sample events
         let events = vec![
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from(1u64),
                 keys: vec![Felt::from(100u64)],
                 data: vec![Felt::from(1000u64)],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
-            EmittedEvent {
+            StarknetEvent {
                 from_address: Felt::from(2u64),
                 keys: vec![Felt::from(200u64)],
                 data: vec![Felt::from(2000u64)],
-                block_hash: None,
-                block_number: None,
+                block_number: 0,
                 transaction_hash: Felt::ZERO,
             },
         ];

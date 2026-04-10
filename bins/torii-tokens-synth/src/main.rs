@@ -565,7 +565,7 @@ async fn run_erc20_profile(config: Erc20ProfileConfig) -> Result<()> {
         }
 
         let decode_start = Instant::now();
-        let envelopes = decoder_context.decode(&batch.events).await?;
+        let envelopes = decoder_context.decode_events(&batch.events).await?;
         let decode_ms = ms(decode_start.elapsed());
 
         let sink_start = Instant::now();
@@ -703,7 +703,7 @@ async fn run_erc721_profile(config: Erc721ProfileConfig) -> Result<()> {
         }
 
         let decode_start = Instant::now();
-        let envelopes = decoder_context.decode(&batch.events).await?;
+        let envelopes = decoder_context.decode_events(&batch.events).await?;
         let decode_ms = ms(decode_start.elapsed());
 
         let sink_start = Instant::now();
@@ -843,7 +843,7 @@ async fn run_erc1155_profile(config: Erc1155ProfileConfig) -> Result<()> {
         }
 
         let decode_start = Instant::now();
-        let envelopes = decoder_context.decode(&batch.events).await?;
+        let envelopes = decoder_context.decode_events(&batch.events).await?;
         let decode_ms = ms(decode_start.elapsed());
 
         let sink_start = Instant::now();

@@ -5,9 +5,11 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet::core::types::{EmittedEvent, Felt};
-use starknet::macros::selector;
+use starknet_types_raw::event::EmittedEvent;
+use starknet_types_raw::Felt;
 use torii::etl::extractor::{ExtractionBatch, SyntheticExtractor};
+
+use crate::decoder::{APPROVAL_SELECTOR, TRANSFER_SELECTOR};
 
 const EXTRACTOR_NAME: &str = "synthetic_erc20";
 
@@ -162,7 +164,7 @@ impl SyntheticErc20Extractor {
                 let event = if self.is_approval(tx_index) {
                     EmittedEvent {
                         from_address: token,
-                        keys: vec![selector!("Approval"), from, to],
+                        keys: vec![APPROVAL_SELECTOR, from, to],
                         data: vec![amount_low, Felt::ZERO],
                         block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                         block_number: Some(block_number),
@@ -171,7 +173,7 @@ impl SyntheticErc20Extractor {
                 } else {
                     EmittedEvent {
                         from_address: token,
-                        keys: vec![selector!("Transfer"), from, to],
+                        keys: vec![TRANSFER_SELECTOR, from, to],
                         data: vec![amount_low, Felt::ZERO],
                         block_hash: Some(Felt::from(0x0300_0000_u64 + block_number)),
                         block_number: Some(block_number),

@@ -9,20 +9,21 @@ name = "torii-server"
 path = "src/main.rs"
 
 [dependencies]
-torii = { path = "../../" }
-torii-common = { path = "../../crates/torii-common" }
+torii.workspace = true
+torii-common.workspace = true
 torii-config-common.workspace = true
 torii-controllers-sink.workspace = true
-torii-dojo = { path = "../../crates/dojo" }
-torii-erc20 = { path = "../../crates/torii-erc20" }
-torii-erc721 = { path = "../../crates/torii-erc721" }
-torii-erc1155 = { path = "../../crates/torii-erc1155" }
-torii-ecs-sink = { path = "../../crates/torii-ecs-sink" }
-torii-entities-historical-sink.workspace = true
-torii-introspect-postgres-sink = { path = "../../crates/introspect-postgres-sink" }
-torii-introspect-sqlite-sink = { path = "../../crates/introspect-sqlite-sink" }
+torii-dojo.workspace = true
+torii-erc20.workspace = true
+torii-erc721.workspace = true
+torii-erc1155.workspace = true
+torii-ecs-sink.workspace = true
+torii-introspect-sql-sink = { workspace = true, features = [
+    "postgres",
+    "sqlite",
+] }
 torii-runtime-common.workspace = true
-torii-sqlite = { path = "../../crates/sqlite" }
+torii-sql = { workspace = true, features = ["postgres", "sqlite"] }
 
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
@@ -31,7 +32,12 @@ starknet = "0.17"
 url = "2.5"
 clap = { version = "4.5", features = ["derive", "env"] }
 anyhow = "1.0"
-sqlx = { version = "0.8", features = ["postgres", "sqlite", "runtime-tokio-rustls", "any"] }
+sqlx = { workspace = true, features = [
+    "postgres",
+    "sqlite",
+    "runtime-tokio-rustls",
+    "any",
+] }
 tonic.workspace = true
 tonic-reflection.workspace = true
 tonic-web.workspace = true

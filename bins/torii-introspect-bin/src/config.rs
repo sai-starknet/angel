@@ -1,13 +1,9 @@
 use anyhow::{bail, Result};
 use clap::{ArgGroup, Parser};
 use starknet::core::types::Felt;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StorageBackend {
-    Postgres,
-    Sqlite,
-}
+use torii_sql::DbBackend;
 
 /// Dojo introspect indexer backed by PostgreSQL or SQLite.
 ///
@@ -177,21 +173,15 @@ impl Config {
         Self::parse_addresses("ERC1155", &self.erc1155)
     }
 
-    pub fn historical_models(&self) -> Vec<String> {
-        let mut models = Vec::with_capacity(self.historical.len());
-        for model in &self.historical {
-            if !model.is_empty() && !models.contains(model) {
-                models.push(model.clone());
-            }
-        }
-        models
+    pub fn historical_models(&self) -> &[String] {
+        &self.historical
     }
 
-    pub fn storage_backend(&self) -> StorageBackend {
+    pub fn storage_backend(&self) -> DbBackend {
         if self.storage_database_url.is_some() {
-            StorageBackend::Postgres
+            DbBackend::Postgres
         } else {
-            StorageBackend::Sqlite
+            DbBackend::Sqlite
         }
     }
 
@@ -210,7 +200,10 @@ impl Config {
                 Ok(url.clone())
             }
             Some(_) => bail!("--storage-database-url must be a PostgreSQL URL"),
-            None => Ok(db_dir.join("introspect.db").to_string_lossy().to_string()),
+            None => Ok(format!(
+                "sqlite://{}",
+                db_dir.join("introspect.db").to_string_lossy()
+            )),
         }
     }
 
@@ -225,6 +218,21 @@ impl Config {
     }
 }
 
+pub fn parse_historical_models(
+    historical: &[String],
+    contracts: &[Felt],
+) -> Result<HashSet<(Felt, String)>> {
+    let mut models = HashSet::with_capacity(historical.len());
+    for model in historical {
+        let parts: Vec<&str> = model.splitn(2, ':').collect();
+        match parts.len()  {
+            1 => contracts.iter().for_each(|&addr| {models.insert((addr, parts[0].to_string()));}),
+            2 => {models.insert((Felt::from_hex(parts[0])?, parts[1].to_string()));},
+            _ => bail!("Invalid historical model format: {model}. Expected format is either `ModelName` or `0xContractAddress:ModelName`"),
+        }
+    }
+    Ok(models)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,7 +280,7 @@ mod tests {
     fn sqlite_is_default_when_storage_database_url_is_omitted() {
         let cfg = Config::parse_from(["torii-server", "--contract", "0x1"]);
 
-        assert_eq!(cfg.storage_backend(), StorageBackend::Sqlite);
+        assert_eq!(cfg.storage_backend(), DbBackend::Sqlite);
         assert!(cfg
             .storage_database_url(Path::new("./torii-data"))
             .unwrap()

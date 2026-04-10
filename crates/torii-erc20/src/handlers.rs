@@ -2,14 +2,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use prost::Message;
 use prost_types::Any;
-use starknet::core::types::Felt;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
+use starknet_types_raw::Felt;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use torii::command::CommandHandler;
 use torii::etl::sink::EventBus;
 use torii::UpdateType;
-use torii_common::{u256_to_bytes, MetadataFetcher};
+use torii_common::MetadataFetcher;
 
 use crate::proto;
 use crate::storage::Erc20Storage;
@@ -112,11 +112,11 @@ impl CommandHandler for Erc20MetadataCommandHandler {
                 let event_bus = self.event_bus.lock().unwrap().clone();
                 if let Some(event_bus) = event_bus {
                     let meta_entry = proto::TokenMetadataEntry {
-                        token: command.token.to_bytes_be().to_vec(),
+                        token: command.token.to_be_bytes_vec(),
                         name: meta.name,
                         symbol: meta.symbol,
                         decimals: meta.decimals.map(|d| d as u32),
-                        total_supply: meta.total_supply.map(u256_to_bytes),
+                        total_supply: meta.total_supply.map(|s| s.),
                     };
 
                     let mut buf = Vec::new();

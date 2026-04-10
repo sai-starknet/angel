@@ -1,7 +1,7 @@
 use crate::schema::Table;
 use async_trait::async_trait;
 use introspect_types::{Attribute, ColumnDef, PrimaryTypeDef, TypeDef};
-use starknet_types_core::felt::Felt;
+use starknet_types_raw::Felt;
 
 #[async_trait]
 pub trait TableStore {

@@ -2,14 +2,12 @@ use std::fmt::Display;
 
 use introspect_types::{Attribute, PrimaryDef, PrimaryTypeDef};
 use itertools::Itertools;
-use sqlx::{
-    encode::IsNull,
-    error::BoxDynError,
-    postgres::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef},
-    types::{BigDecimal, Json},
-    Decode, Encode, Postgres, Type,
-};
-use starknet_types_core::felt::Felt;
+use sqlx::encode::IsNull;
+use sqlx::error::BoxDynError;
+use sqlx::postgres::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef};
+use sqlx::types::{BigDecimal, Json};
+use sqlx::{Decode, Encode, Postgres, Type};
+use starknet_types_raw::Felt;
 
 #[derive(sqlx::Type, Debug)]
 #[sqlx(type_name = "introspect.attribute", no_pg_array)]
@@ -139,19 +137,19 @@ impl From<&Attribute> for PgAttribute {
 
 impl From<PgFelt> for Felt {
     fn from(value: PgFelt) -> Self {
-        Felt::from_bytes_be(&value.0)
+        value.0.into()
     }
 }
 
 impl From<Felt> for PgFelt {
     fn from(value: Felt) -> Self {
-        PgFelt(value.to_bytes_be())
+        PgFelt(value.to_be_bytes())
     }
 }
 
 impl From<&Felt> for PgFelt {
     fn from(value: &Felt) -> Self {
-        PgFelt(value.to_bytes_be())
+        PgFelt(value.to_be_bytes())
     }
 }
 
@@ -194,7 +192,7 @@ impl From<&PrimaryDef> for PgPrimary {
 }
 
 pub fn felt252_type(value: &Felt) -> String {
-    format!("'\\x{}'::felt252", hex::encode(value.to_bytes_be()))
+    format!("'\\x{}'::felt252", hex::encode(value.to_be_bytes()))
 }
 
 pub fn felt252_array_type(values: &[Felt]) -> String {

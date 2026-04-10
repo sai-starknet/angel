@@ -189,7 +189,7 @@ impl Decoder for BroadcastDecoder {
         "broadcast"
     }
 
-    async fn decode_event(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
+    async fn decode(&self, event: &EmittedEvent) -> Result<Vec<Envelope>> {
         let broadcast_event = BroadcastEvent {
             event_id: format!("{:#x}", event.transaction_hash),
             from_address: format!("{:#x}", event.from_address),

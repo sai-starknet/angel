@@ -5,13 +5,14 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet::core::types::{
-    requests::GetEventsRequest, BlockId, EventFilter, EventFilterWithPage, Felt, ResultPageRequest,
-};
+use starknet::core::types::requests::GetEventsRequest;
+use starknet::core::types::{BlockId, EventFilter, EventFilterWithPage, ResultPageRequest};
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
+use starknet_types_raw::Felt;
 use std::collections::HashSet;
 use std::sync::Arc;
+use torii_types::event::StarknetEvent;
 
 use crate::etl::engine_db::EngineDb;
 use crate::etl::extractor::event_common::{
@@ -313,7 +314,7 @@ impl Extractor for GlobalEventExtractor {
             _ => anyhow::bail!("Unexpected response type for global event request"),
         };
 
-        let mut all_events = events_page.events;
+        let mut all_events: Vec<StarknetEvent> = StarknetEvent::filter_pending(events_page.events);
         let mut any_advanced = false;
 
         if let Some(token) = events_page.continuation_token {

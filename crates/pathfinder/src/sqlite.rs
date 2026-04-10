@@ -1,9 +1,6 @@
-use rusqlite::params;
 use rusqlite::types::ValueRef;
-use rusqlite::Connection;
-use rusqlite::Error as SqliteError;
-use rusqlite::Row;
-use torii_starknet::Felt;
+use rusqlite::{params, Connection, Error as SqliteError, Row};
+use starknet_types_raw::Felt;
 
 pub type SqliteResult<T> = Result<T, SqliteError>;
 
@@ -91,7 +88,9 @@ pub trait RowExt {
 impl RowExt for Row<'_> {
     fn get_felt(&self, idx: usize) -> SqliteResult<Felt> {
         match self.get_ref(idx)? {
-            ValueRef::Blob(b) => Ok(Felt::from_bytes_be_slice(b)),
+            ValueRef::Blob(b) => Felt::from_be_bytes_slice(b).map_err(|e| {
+                SqliteError::FromSqlConversionFailure(idx, rusqlite::types::Type::Blob, Box::new(e))
+            }),
             _ => Err(SqliteError::InvalidColumnType(
                 idx,
                 "felt".into(),
@@ -102,7 +101,9 @@ impl RowExt for Row<'_> {
 
     fn get_felt_opt(&self, idx: usize) -> SqliteResult<Option<Felt>> {
         match self.get_ref(idx)? {
-            ValueRef::Blob(b) => Ok(Some(Felt::from_bytes_be_slice(b))),
+            ValueRef::Blob(b) => Ok(Some(Felt::from_be_bytes_slice(b).map_err(|e| {
+                SqliteError::FromSqlConversionFailure(idx, rusqlite::types::Type::Blob, Box::new(e))
+            })?)),
             ValueRef::Null => Ok(None),
             _ => Err(SqliteError::InvalidColumnType(
                 idx,

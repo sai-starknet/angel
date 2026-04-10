@@ -1,0 +1,22 @@
+[package]
+name = "torii-sql"
+version = "0.1.0"
+edition = "2021"
+description = "Common utilities for Torii token indexers"
+
+[dependencies]
+async-trait = "0.1"
+sqlx = { workspace = true, features = ["runtime-tokio-rustls"] }
+itertools.workspace = true
+futures.workspace = true
+crc.workspace = true
+starknet-types-raw.workspace = true
+log.workspace = true
+
+[features]
+postgres = ["sqlx/postgres"]
+sqlite = ["sqlx/sqlite"]
+mysql = ["sqlx/mysql"]
+
+[lints]
+workspace = true

@@ -1,26 +1,21 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Result as AnyResult};
 use std::path::{Path, PathBuf};
+use torii_sql::connection::DbBackend;
 
 pub const DEFAULT_SQLITE_MAX_CONNECTIONS: u32 = 500;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DatabaseBackend {
-    Postgres,
-    Sqlite,
-}
-
-pub fn backend_from_url_or_path(value: &str) -> DatabaseBackend {
+pub fn backend_from_url_or_path(value: &str) -> DbBackend {
     if value.starts_with("postgres://") || value.starts_with("postgresql://") {
-        DatabaseBackend::Postgres
+        DbBackend::Postgres
     } else {
-        DatabaseBackend::Sqlite
+        DbBackend::Sqlite
     }
 }
 
 pub fn validate_uniform_backends(
     named_urls: &[(&str, &str)],
     mixed_backend_message: &str,
-) -> Result<DatabaseBackend> {
+) -> AnyResult<DbBackend> {
     let Some((_, first_url)) = named_urls.first() else {
         bail!("at least one database URL must be provided");
     };
@@ -78,17 +73,17 @@ pub struct TokenDbSetup {
     pub erc20_url: String,
     pub erc721_url: String,
     pub erc1155_url: String,
-    pub engine_backend: DatabaseBackend,
-    pub erc20_backend: DatabaseBackend,
-    pub erc721_backend: DatabaseBackend,
-    pub erc1155_backend: DatabaseBackend,
+    pub engine_backend: DbBackend,
+    pub erc20_backend: DbBackend,
+    pub erc721_backend: DbBackend,
+    pub erc1155_backend: DbBackend,
 }
 
 pub fn resolve_token_db_setup(
     db_dir: &Path,
     engine_database_url: Option<&str>,
     storage_database_url: Option<&str>,
-) -> Result<TokenDbSetup> {
+) -> AnyResult<TokenDbSetup> {
     let engine_url = engine_database_url.map_or_else(
         || db_dir.join("engine.db").to_string_lossy().to_string(),
         ToOwned::to_owned,
@@ -119,10 +114,10 @@ pub fn resolve_token_db_setup(
 
     if engine_database_url
         .map(backend_from_url_or_path)
-        .is_some_and(|backend| backend == DatabaseBackend::Postgres)
-        && (erc20_backend != DatabaseBackend::Postgres
-            || erc721_backend != DatabaseBackend::Postgres
-            || erc1155_backend != DatabaseBackend::Postgres)
+        .is_some_and(|backend| backend == DbBackend::Postgres)
+        && (erc20_backend != DbBackend::Postgres
+            || erc721_backend != DbBackend::Postgres
+            || erc1155_backend != DbBackend::Postgres)
     {
         bail!(
             "Engine is configured for Postgres but one or more token storages resolved to SQLite. Set --storage-database-url to the same Postgres URL."
@@ -161,8 +156,8 @@ mod tests {
     fn resolves_sqlite_defaults() {
         let db_dir = Path::new("./torii-data");
         let setup = resolve_token_db_setup(db_dir, None, None).unwrap();
-        assert_eq!(setup.engine_backend, DatabaseBackend::Sqlite);
-        assert_eq!(setup.erc20_backend, DatabaseBackend::Sqlite);
+        assert_eq!(setup.engine_backend, DbBackend::Sqlite);
+        assert_eq!(setup.erc20_backend, DbBackend::Sqlite);
         assert!(setup.engine_url.ends_with("engine.db"));
         assert!(setup.erc20_url.ends_with("erc20.db"));
     }
@@ -174,8 +169,9 @@ mod tests {
             db_dir,
             Some("postgres://localhost/torii"),
             Some("./torii-data"),
-        )
-        .expect_err("expected mixed backend validation error");
+        );
+        println!("{err:?}");
+        let err = err.expect_err("expected mixed backend validation error");
         assert!(err
             .to_string()
             .contains("Engine is configured for Postgres"));
@@ -190,8 +186,8 @@ mod tests {
             Some("postgres://localhost/torii"),
         )
         .unwrap();
-        assert_eq!(setup.engine_backend, DatabaseBackend::Postgres);
-        assert_eq!(setup.erc721_backend, DatabaseBackend::Postgres);
+        assert_eq!(setup.engine_backend, DbBackend::Postgres);
+        assert_eq!(setup.erc721_backend, DbBackend::Postgres);
     }
 
     #[test]
@@ -204,7 +200,7 @@ mod tests {
             "mixed backends",
         )
         .unwrap();
-        assert_eq!(backend, DatabaseBackend::Postgres);
+        assert_eq!(backend, DbBackend::Postgres);
     }
 
     #[test]
