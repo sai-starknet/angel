@@ -6,7 +6,7 @@ use serde::ser::SerializeMap;
 use serde::Serializer;
 use serde_json::{Result as JsonResult, Serializer as JsonSerializer};
 use sqlx::Arguments;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::fmt::{Display, Write};
 use torii_sql::types::SqlFelt;

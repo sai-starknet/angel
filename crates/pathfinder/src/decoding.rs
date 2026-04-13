@@ -1,8 +1,8 @@
 use crate::sqlite::BlockEventsRow;
 use crate::{PFError, PFResult};
+use sai_felt::Felt;
+use sai_starknet_types::Event;
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::event::Event;
-use starknet_types_raw::Felt;
 use std::cell::RefCell;
 use std::fmt::{Formatter, Result as FmtResult};
 use std::io::Result as IoResult;

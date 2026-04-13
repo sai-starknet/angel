@@ -33,7 +33,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Blockchain
-starknet-types-raw.workspace = true
+sai-felt.workspace = true
 
 # Utilities
 anyhow.workspace = true

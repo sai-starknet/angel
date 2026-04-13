@@ -14,8 +14,8 @@ urlencoding = "2"
 async-trait = "0.1"
 serde.workspace = true
 serde_json.workspace = true
-starknet.workspace = true
-starknet-types-raw.workspace = true
+sai-starknet.workspace = true
+sai-felt.workspace = true
 primitive-types.workspace = true
 thiserror.workspace = true
 

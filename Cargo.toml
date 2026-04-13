@@ -1,6 +1,7 @@
 [workspace]
 members = [
   ".",
+  "crates/core",
   "crates/torii-common",
   "crates/torii-erc20",
   "crates/torii-erc721",
@@ -14,7 +15,6 @@ members = [
   "crates/types",
 ]
 resolver = "2"
-
 
 [package]
 name = "torii"
@@ -55,7 +55,10 @@ log = "0.4.29"
 clap = { version = "4.5", features = ["derive"] }
 
 # Starknet
-starknet = "0.17"
+sai-starknet = { git = "http://github.com/sai-starknet/sai-starknet-rs" }
+sai-felt = { git = "http://github.com/sai-starknet/sai-starknet-rs" }
+sai-starknet-provider = { git = "http://github.com/sai-starknet/sai-starknet-rs" }
+sai-starknet-types = { git = "http://github.com/sai-starknet/sai-starknet-rs" }
 
 # Database
 sqlx = { git = "https://github.com/bengineer42/sqlx", version = "0.8.6", features = [
@@ -67,6 +70,7 @@ rusqlite = { version = "0.32.1", features = ["bundled"] }
 # Hashing
 blake3 = "1.8.3"
 xxhash-rust = { version = "0.8", features = ["xxh3", "const_xxh3"] }
+ahash = "0.8.12"
 
 # ETL Pipeline dependencies
 async-trait = "0.1"
@@ -81,27 +85,25 @@ tokio-util = "0.7"
 anyhow = "1.0"
 thiserror = "2.0.17"
 
-# Types
+# Build
 hex = "0.4"
 primitive-types = { version = "0.14.0", features = ["serde"] }
 starknet-types-core = "0.2.0"
 bigdecimal = "0.4.10"
-starknet-types-raw = { git = "https://github.com/cartridge-gg/starknet-types-raw", branch = "main" }
-
-# Build
 tonic-build = "0.12"
 
 # Introspect
-introspect-events = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-introspect-types = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-introspect-rust-macros = { git = "https://github.com/cartridge-gg/introspect", rev = "6542dec" }
-dojo-introspect = { git = "https://github.com/dojoengine/dojo-introspect", rev = "1345486" }
+introspect-events = { git = "https://github.com/sai-starknet/introspect" }
+introspect-types = { git = "https://github.com/sai-starknet/introspect" }
+introspect-rust-macros = { git = "https://github.com/sai-starknet/introspect" }
+dojo-introspect = { git = "https://github.com/sai-starknet/dojo-introspect" }
 
 
 # Utils
 resolve-path = "0.1.0"
 itertools = "0.14.0"
 bincode = { version = "2.0.0" }
+sai-conversion = { git = "http://github.com/sai-starknet/rust-utils" }
 
 # Torii core
 torii.path = "."
@@ -174,8 +176,8 @@ rustls-pemfile = "2.0"
 serde_json.workspace = true
 serde.workspace = true
 sqlx = { workspace = true, features = ["sqlite"] }
-starknet.workspace = true
-starknet-types-raw = { workspace = true, features = ["events"] }
+sai-starknet.workspace = true
+sai-felt = { workspace = true, features = ["field"] }
 tokio-stream.workspace = true
 tokio-rustls = { version = "0.26", default-features = false, features = [
   "logging",
@@ -188,7 +190,7 @@ tonic-reflection.workspace = true
 tonic-web.workspace = true
 tonic.workspace = true
 torii-common.workspace = true
-torii-types = { workspace = true, features = ["field"] }
+torii-types.workspace = true
 tower.workspace = true
 tower-http.workspace = true
 tracing.workspace = true

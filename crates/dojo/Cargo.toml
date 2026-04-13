@@ -9,7 +9,7 @@ async-trait.workspace = true
 serde_json.workspace = true
 serde.workspace = true
 starknet-types-core.workspace = true
-starknet.workspace = true
+sai-starknet.workspace = true
 tokio.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
@@ -22,7 +22,7 @@ sqlx = { workspace = true, features = [
     "migrate",
 ] }
 
-starknet-types-raw.workspace = true
+sai-felt.workspace = true
 dojo-introspect.workspace = true
 introspect-types.workspace = true
 

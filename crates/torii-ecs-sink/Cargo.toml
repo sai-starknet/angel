@@ -12,7 +12,7 @@ torii-sql.workspace = true
 
 dojo-introspect.workspace = true
 introspect-types.workspace = true
-starknet-types-raw.workspace = true
+sai-felt.workspace = true
 
 anyhow.workspace = true
 async-trait.workspace = true

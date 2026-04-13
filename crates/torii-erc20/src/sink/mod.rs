@@ -1,5 +1,5 @@
 use primitive_types::U256;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use torii::etl::EventContext;
 
 use crate::event::{ApprovalMsg, Erc20Body, TransferInfo};

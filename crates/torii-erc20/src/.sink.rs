@@ -24,7 +24,7 @@ use primitive_types::U256;
 use prost::Message;
 use prost_types::Any;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

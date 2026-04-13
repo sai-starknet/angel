@@ -6,7 +6,7 @@ use introspect_types::{
     Attribute, ColumnDef, FeltId, FeltIds, PrimaryDef, PrimaryTypeDef, PrimaryValue, TypeDef,
 };
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use torii::etl::envelope::EventMsg;
 use torii::etl::{EventBody, TypeId};
 

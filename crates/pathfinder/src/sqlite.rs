@@ -1,6 +1,6 @@
 use rusqlite::types::ValueRef;
 use rusqlite::{params, Connection, Error as SqliteError, Row};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 
 pub type SqliteResult<T> = Result<T, SqliteError>;
 

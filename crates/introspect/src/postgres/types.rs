@@ -2,12 +2,12 @@ use std::fmt::Display;
 
 use introspect_types::{Attribute, PrimaryDef, PrimaryTypeDef};
 use itertools::Itertools;
+use sai_felt::Felt;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
 use sqlx::postgres::{PgArgumentBuffer, PgHasArrayType, PgTypeInfo, PgValueRef};
 use sqlx::types::{BigDecimal, Json};
 use sqlx::{Decode, Encode, Postgres, Type};
-use starknet_types_raw::Felt;
 
 #[derive(sqlx::Type, Debug)]
 #[sqlx(type_name = "introspect.attribute", no_pg_array)]

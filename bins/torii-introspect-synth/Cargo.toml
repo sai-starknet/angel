@@ -25,7 +25,7 @@ sqlx = { workspace = true, features = ["runtime-tokio-rustls", "postgres"] }
 starknet = "0.17"
 dojo-introspect.workspace = true
 introspect-types.workspace = true
-starknet-types-raw.workspace = true
+sai-felt.workspace = true
 torii-types.workspace = true
 
 

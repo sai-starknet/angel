@@ -47,7 +47,7 @@ use etl::sink::{EventBus, Sink};
 use etl::{Decoder, DecoderContext, MultiSink, SampleExtractor};
 use grpc::{create_grpc_service, GrpcState, SubscriptionManager};
 use http::create_http_router;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 
 // Include the file descriptor set generated at build time.
 // This is also exported publicly so external sink authors can use it for reflection.

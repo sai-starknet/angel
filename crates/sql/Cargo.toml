@@ -10,7 +10,7 @@ sqlx = { workspace = true, features = ["runtime-tokio-rustls"] }
 itertools.workspace = true
 futures.workspace = true
 crc.workspace = true
-starknet-types-raw.workspace = true
+sai-felt.workspace = true
 log.workspace = true
 
 [features]

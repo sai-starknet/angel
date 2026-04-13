@@ -14,4 +14,4 @@ serde.workspace = true
 serde_json.workspace = true
 dojo-introspect.workspace = true
 introspect-types.workspace = true
-starknet-types-raw.workspace = true
+sai-felt.workspace = true

@@ -38,7 +38,7 @@ use sqlx::pool::PoolConnection;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Any, AnyConnection, Column, ConnectOptions, Pool, QueryBuilder, Row};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::pin::Pin;

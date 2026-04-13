@@ -5,8 +5,8 @@
 //! SampleExtractor to generate test data.
 //! The decoder is where the events are decoded into envelopes based on the event content.
 
-use starknet_types_raw::event::EmittedEvent;
-use starknet_types_raw::Felt;
+use sai_felt::event::EmittedEvent;
+use sai_felt::Felt;
 
 const DUMMY_CONTRACT_ADDRESS: Felt =
     Felt::from_hex_unchecked("0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7");

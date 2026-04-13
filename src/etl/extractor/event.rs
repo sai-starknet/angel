@@ -54,7 +54,7 @@ use starknet::core::types::requests::GetEventsRequest;
 use starknet::core::types::{BlockId, EventFilter, EventFilterWithPage, ResultPageRequest};
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use torii_types::event::StarknetEvent;

@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 use sqlx::any::AnyPoolOptions;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Any, ConnectOptions, Pool, Row};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::str::FromStr;
 

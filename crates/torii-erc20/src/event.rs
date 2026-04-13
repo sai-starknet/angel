@@ -1,5 +1,5 @@
 use primitive_types::U256;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use torii::etl::{EventBody, EventMsg, TypeId};
 use torii::typed_body_impl;
 use torii_common::utils::{felts_to_u256, U256ParseError};

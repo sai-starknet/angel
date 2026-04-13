@@ -18,7 +18,7 @@ use prost::Message;
 use prost_types::Any as ProtoAny;
 use sqlx::any::AnyPoolOptions;
 use sqlx::{Any as SqlxAny, QueryBuilder};
-use starknet_types_raw::event::EmittedEvent;
+use sai_felt::event::EmittedEvent;
 use std::sync::Arc;
 use torii::etl::envelope::{Envelope, TypeId};
 use torii::etl::extractor::ExtractionBatch;

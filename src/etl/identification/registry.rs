@@ -21,7 +21,7 @@ use starknet::core::types::requests::{GetClassHashAtRequest, GetClassRequest};
 use starknet::core::types::{BlockId, BlockTag};
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use tokio::sync::RwLock;
 
 /// Trait for contract identification (object-safe).

@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use torii::etl::{Decoder, Envelope, EventMsg};
 use torii_common::utils::U256ParseError;
 use torii_types::event::EventContext;

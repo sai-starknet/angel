@@ -1,4 +1,4 @@
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use xxhash_rust::xxh3::Xxh3;
 
 pub fn truncate(s: &str, max_chars: usize) -> &str {

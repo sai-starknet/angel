@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use introspect_types::{ColumnInfo, PrimaryDef, TypeDef};
 use itertools::Itertools;
 use sqlx::{Database, Pool};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use torii_introspect::events::{IntrospectBody, IntrospectMsg};

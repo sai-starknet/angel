@@ -18,7 +18,7 @@
 //! - Raw JSON fallback for inline metadata
 
 use primitive_types::U256;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

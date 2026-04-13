@@ -16,7 +16,7 @@ use crate::etl::decoder::EventContext;
 use crate::etl::engine_db::EngineDb;
 use crate::etl::envelope::Envelope;
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;

@@ -6,11 +6,8 @@ description = "Common types for Torii"
 
 [dependencies]
 thiserror.workspace = true
-starknet-types-raw = { workspace = true, features = ["serde"] }
-starknet = { workspace = true, optional = true }
+sai-felt = { workspace = true }
+sai-starknet-types.workspace = true
 
 [lints]
 workspace = true
-
-[features]
-field = ["dep:starknet"]

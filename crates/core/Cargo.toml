@@ -5,6 +5,14 @@ edition = "2021"
 description = "Common utilities for Torii token indexers"
 
 [dependencies]
+async-trait.workspace = true
+sai-felt.workspace = true
+sai-starknet-types.workspace = true
+ahash.workspace = true
+serde.workspace = true
+
+sai-conversion.workspace = true
+
 
 [lints]
 workspace = true

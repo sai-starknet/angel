@@ -12,7 +12,7 @@
 use anyhow::Result;
 use primitive_types::U256;
 use rusqlite::{params, params_from_iter, Connection, ToSql};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};

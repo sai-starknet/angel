@@ -1,4 +1,4 @@
-use starknet_types_raw::Felt;
+use sai_starknet_types::{EmittedEvent, Felt};
 
 #[derive(Debug, Clone)]
 pub struct StarknetEvent {
@@ -37,22 +37,17 @@ impl std::fmt::Display for EventContext {
     }
 }
 
-#[cfg(feature = "field")]
-mod field {
-    use super::{MissingBlockNumber, StarknetEvent};
-    use starknet::core::types::EmittedEvent as SnEmittedEvent;
-    impl TryFrom<SnEmittedEvent> for StarknetEvent {
-        type Error = MissingBlockNumber;
+impl TryFrom<EmittedEvent> for StarknetEvent {
+    type Error = MissingBlockNumber;
 
-        fn try_from(event: SnEmittedEvent) -> Result<Self, Self::Error> {
-            Ok(Self {
-                from_address: event.from_address.into(),
-                keys: event.keys.into_iter().map(Into::into).collect(),
-                data: event.data.into_iter().map(Into::into).collect(),
-                block_number: event.block_number.ok_or(MissingBlockNumber)?,
-                transaction_hash: event.transaction_hash.into(),
-            })
-        }
+    fn try_from(event: EmittedEvent) -> Result<Self, Self::Error> {
+        Ok(Self {
+            from_address: event.from_address.into(),
+            keys: event.keys.into_iter().map(Into::into).collect(),
+            data: event.data.into_iter().map(Into::into).collect(),
+            block_number: event.block_number.ok_or(MissingBlockNumber)?,
+            transaction_hash: event.transaction_hash.into(),
+        })
     }
 }
 

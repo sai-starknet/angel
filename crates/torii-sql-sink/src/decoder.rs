@@ -2,8 +2,8 @@
 //!
 //! It demonstrate how to decode Starknet events into envelopes based on the event content.
 use async_trait::async_trait;
-use starknet_types_raw::event::EmittedEvent;
-use starknet_types_raw::Felt;
+use sai_felt::event::EmittedEvent;
+use sai_felt::Felt;
 use std::any::Any;
 use std::collections::HashMap;
 

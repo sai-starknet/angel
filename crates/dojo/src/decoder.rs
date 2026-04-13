@@ -17,7 +17,7 @@ use introspect_types::{
     SliceFeltSource,
 };
 use itertools::Itertools;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::RwLock;

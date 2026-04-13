@@ -19,7 +19,7 @@ use crate::storage::{
 use async_trait::async_trait;
 use futures::stream::Stream;
 use primitive_types::U256;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::broadcast;

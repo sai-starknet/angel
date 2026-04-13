@@ -3,7 +3,7 @@ use crate::{RecordResult, Table};
 use introspect_types::ColumnInfo;
 use serde::ser::SerializeMap;
 use serde_json::Serializer as JsonSerializer;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::io::Write;
 use torii_introspect::tables::SerializeEntries;
 use torii_introspect::Record;

@@ -12,7 +12,7 @@ pub mod sql;
 use crate::table::DojoTableInfo;
 use crate::{DojoTable, DojoToriiResult};
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 
 #[async_trait]

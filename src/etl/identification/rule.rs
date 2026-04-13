@@ -4,7 +4,7 @@
 //! can be identified by inspecting the ABI.
 
 use anyhow::Result;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 
 use crate::etl::decoder::DecoderId;
 use crate::etl::extractor::ContractAbi;

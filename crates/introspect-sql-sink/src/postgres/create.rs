@@ -7,7 +7,7 @@ use introspect_types::{
     StructDef, TupleDef, TypeDef, VariantDef,
 };
 use itertools::Itertools;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::rc::Rc;
 use torii_sql::postgres::PgQuery;
 use torii_sql::Queries;

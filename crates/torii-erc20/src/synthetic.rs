@@ -5,8 +5,8 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet_types_raw::event::EmittedEvent;
-use starknet_types_raw::Felt;
+use sai_felt::event::EmittedEvent;
+use sai_felt::Felt;
 use torii::etl::extractor::{ExtractionBatch, SyntheticExtractor};
 
 use crate::decoder::{APPROVAL_SELECTOR, TRANSFER_SELECTOR};

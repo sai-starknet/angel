@@ -1,4 +1,4 @@
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SqlFelt(pub [u8; 32]);

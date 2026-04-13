@@ -11,7 +11,8 @@ serde.workspace = true
 bincode = { workspace = true, features = ["serde"] }
 thiserror.workspace = true
 rand = "0.8.5"
-starknet-types-raw = { workspace = true, features = ["serde"] }
+sai-felt = { workspace = true }
+sai-starknet-types.workspace = true
 torii-types.workspace = true
 
 # Etl dependencies

@@ -10,7 +10,7 @@ use introspect_types::CairoEventInfo;
 use serde::Serialize;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Row};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;

@@ -5,7 +5,7 @@ use introspect_types::{
     FeltSource,
 };
 use serde::{Deserialize, Serialize};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::RwLock;

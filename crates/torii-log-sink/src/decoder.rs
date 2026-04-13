@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use starknet_types_raw::event::EmittedEvent;
+use sai_felt::event::EmittedEvent;
 use std::any::Any;
 use torii::etl::envelope::{Envelope, TypeId, TypedBody};
 use torii::etl::Decoder;
@@ -106,7 +106,7 @@ impl Decoder for LogDecoder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use starknet_types_raw::Felt;
+    use sai_felt::Felt;
     use torii::etl::StarknetEvent;
 
     #[tokio::test]

@@ -12,7 +12,7 @@ use sqlx::error::BoxDynError;
 use sqlx::sqlite::SqliteArgumentValue;
 use sqlx::Error::Encode as EncodeError;
 use sqlx::{Arguments, Encode, Sqlite, Type};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::sync::Arc;
 use torii_introspect::Record;
 use torii_sql::{Queries, SqliteArguments, SqliteQuery};

@@ -8,12 +8,12 @@ use anyhow::{Context, Result};
 /// Maximum number of requests per batch to avoid RPC limits
 const MAX_BATCH_SIZE: usize = 500;
 use primitive_types::U256;
+use sai_felt::Felt;
 use starknet::core::types::requests::CallRequest;
 use starknet::core::types::{BlockId, FunctionCall};
 use starknet::macros::selector;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use starknet_types_raw::Felt;
 use std::sync::Arc;
 use torii_common::utils::felts_to_u256;
 

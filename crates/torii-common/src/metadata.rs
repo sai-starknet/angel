@@ -12,7 +12,7 @@ use starknet::core::utils::parse_cairo_short_string;
 use starknet::macros::selector;
 use starknet::providers::jsonrpc::{HttpTransport, JsonRpcClient};
 use starknet::providers::{Provider, ProviderRequestData, ProviderResponseData};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::sync::Arc;
 
 use crate::utils::felts_to_u256;

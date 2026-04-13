@@ -4,7 +4,7 @@ use dojo_introspect::selector::compute_selector_from_namespace_and_name;
 use dojo_introspect::{DojoSchema, DojoSerde};
 use introspect_types::transcode::Transcode;
 use introspect_types::{Attribute, Attributes, CairoSerde, ColumnDef, ColumnInfo, PrimaryDef};
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use torii_introspect::schema::TableSchema;
 

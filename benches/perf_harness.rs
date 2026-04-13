@@ -4,7 +4,7 @@ use axum::http::Request;
 use axum::Router;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use starknet::macros::selector;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};

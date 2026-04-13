@@ -1,5 +1,5 @@
 use primitive_types::U256;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 
 pub trait ElementsInto<T> {
     fn elements_into(self) -> Vec<T>;

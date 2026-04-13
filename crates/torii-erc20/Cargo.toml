@@ -14,8 +14,8 @@ torii-types.workspace = true
 tokio = { workspace = true, features = ["full"] }
 async-trait.workspace = true
 
-starknet-types-raw.workspace = true
-starknet.workspace = true
+sai-felt.workspace = true
+sai-starknet.workspace = true
 
 # Storage
 rusqlite = { workspace = true }

@@ -2,7 +2,7 @@ pub mod context;
 
 use super::envelope::Envelope;
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use torii_types::event::{EventContext, StarknetEvent};
@@ -47,7 +47,7 @@ pub use context::DecoderContext;
 /// use crate::etl::decoder::StarknetEvent;
 /// use async_trait::async_trait;
 /// use std::collections::HashMap;
-/// use starknet_types_raw::Felt;
+/// use sai_felt::Felt;
 ///
 /// pub struct MyDecoder {
 ///     contract_filters: Vec<Felt>,

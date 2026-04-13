@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use starknet_types_raw::Felt;
+use sai_felt::Felt;
 use std::collections::HashMap;
 use std::sync::Arc;
 
